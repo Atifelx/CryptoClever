@@ -143,9 +143,21 @@ const COINGECKO_IDS: Record<string, string> = {
  * This is the most reliable source - always works, no restrictions
  */
 function getGitHubLogoUrl(symbol: string, baseAsset?: string): string | null {
-  // Remove quote asset (e.g., BTCUSDT -> BTC)
-  const asset = baseAsset || symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
+  // Use baseAsset if provided, otherwise extract from symbol
+  let asset: string;
+  if (baseAsset) {
+    asset = baseAsset;
+  } else {
+    // Remove quote asset (e.g., BTCUSDT -> BTC)
+    asset = symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
+  }
+  
   const normalized = asset.toLowerCase().trim();
+  
+  // Validate we have a symbol
+  if (!normalized || normalized.length === 0) {
+    return null;
+  }
   
   // GitHub raw content - 100% reliable, 24/7, free, no rate limits, no CORS
   // Icons don't change, so we can cache forever
@@ -158,9 +170,20 @@ function getGitHubLogoUrl(symbol: string, baseAsset?: string): string | null {
  * Format: https://coin-images.coingecko.com/coins/images/{imageId}/large/bitcoin.png
  */
 function getCoinGeckoAltLogoUrl(symbol: string, baseAsset?: string): string | null {
-  // Remove quote asset (e.g., BTCUSDT -> BTC)
-  const asset = baseAsset || symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
+  // Use baseAsset if provided, otherwise extract from symbol
+  let asset: string;
+  if (baseAsset) {
+    asset = baseAsset;
+  } else {
+    // Remove quote asset (e.g., BTCUSDT -> BTC)
+    asset = symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
+  }
   const normalized = asset.toLowerCase().trim();
+  
+  // Validate we have a symbol
+  if (!normalized || normalized.length === 0) {
+    return null;
+  }
   
   // Map to CoinGecko coin names
   const coinGeckoNames: Record<string, string> = {
@@ -229,7 +252,20 @@ function getCoinGeckoAltLogoUrl(symbol: string, baseAsset?: string): string | nu
  * Used when CoinGecko icon is not available
  */
 function getFallbackAvatarUrl(symbol: string, baseAsset?: string): string {
-  const asset = baseAsset || symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
+  // Use baseAsset if provided, otherwise extract from symbol
+  let asset: string;
+  if (baseAsset) {
+    asset = baseAsset;
+  } else {
+    // Remove quote asset (e.g., BTCUSDT -> BTC)
+    asset = symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
+  }
+  
+  // Fallback to symbol if asset is empty
+  if (!asset || asset.length === 0) {
+    asset = symbol;
+  }
+  
   const displayName = asset.length > 4 ? asset.substring(0, 4).toUpperCase() : asset.toUpperCase();
   
   // Generate a consistent color based on the symbol
