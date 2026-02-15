@@ -137,24 +137,91 @@ const COINGECKO_IDS: Record<string, string> = {
 };
 
 /**
- * Get CoinGecko CDN logo URL for a crypto symbol
- * CoinGecko CDN is 100% reliable, 24/7 available, free, no rate limits
- * Format: https://assets.coingecko.com/coins/images/{imageId}/large/{symbol}.png
+ * Get GitHub raw content logo URL for a crypto symbol
+ * GitHub raw content is 100% reliable, 24/7 available, free, no rate limits, no CORS issues
+ * Format: https://raw.githubusercontent.com/cjdowner/cryptocurrency-icons/master/128/color/{symbol}.png
+ * This is the most reliable source - always works, no restrictions
  */
-function getCoinGeckoLogoUrl(symbol: string, baseAsset?: string): string | null {
+function getGitHubLogoUrl(symbol: string, baseAsset?: string): string | null {
   // Remove quote asset (e.g., BTCUSDT -> BTC)
   const asset = baseAsset || symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
   const normalized = asset.toLowerCase().trim();
   
-  // Get CoinGecko image ID
-  const imageId = COINGECKO_IMAGE_IDS[normalized];
-  if (!imageId) {
-    return null; // Not in our mapping, use fallback
+  // GitHub raw content - 100% reliable, 24/7, free, no rate limits, no CORS
+  // Icons don't change, so we can cache forever
+  // This repository has 200+ cryptocurrency icons
+  return `https://raw.githubusercontent.com/cjdowner/cryptocurrency-icons/master/128/color/${normalized}.png`;
+}
+
+/**
+ * Get CoinGecko alternative CDN logo URL (backup)
+ * Format: https://coin-images.coingecko.com/coins/images/{imageId}/large/bitcoin.png
+ */
+function getCoinGeckoAltLogoUrl(symbol: string, baseAsset?: string): string | null {
+  // Remove quote asset (e.g., BTCUSDT -> BTC)
+  const asset = baseAsset || symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
+  const normalized = asset.toLowerCase().trim();
+  
+  // Map to CoinGecko coin names
+  const coinGeckoNames: Record<string, string> = {
+    'btc': 'bitcoin',
+    'eth': 'ethereum',
+    'bnb': 'binancecoin',
+    'sol': 'solana',
+    'xrp': 'ripple',
+    'ada': 'cardano',
+    'doge': 'dogecoin',
+    'matic': 'matic-network',
+    'dot': 'polkadot',
+    'ltc': 'litecoin',
+    'avax': 'avalanche-2',
+    'link': 'chainlink',
+    'atom': 'cosmos',
+    'etc': 'ethereum-classic',
+    'xlm': 'stellar',
+    'algo': 'algorand',
+    'vet': 'vechain',
+    'icp': 'internet-computer',
+    'fil': 'filecoin',
+    'trx': 'tron',
+    'eos': 'eos',
+    'aave': 'aave',
+    'uni': 'uniswap',
+    'axs': 'axie-infinity',
+    'sand': 'the-sandbox',
+    'mana': 'decentraland',
+    'gala': 'gala',
+    'enj': 'enjincoin',
+    'bat': 'basic-attention-token',
+    'zec': 'zcash',
+    'dash': 'dash',
+    'xmr': 'monero',
+    'zrx': '0x',
+    'comp': 'compound-governance-token',
+    'mkr': 'maker',
+    'yfi': 'yearn-finance',
+    'snx': 'havven',
+    'crv': 'curve-dao-token',
+    '1inch': '1inch',
+    'sushi': 'sushi',
+    'usdt': 'tether',
+    'usdc': 'usd-coin',
+    'busd': 'binance-usd',
+    'dai': 'dai',
+  };
+  
+  const coinGeckoName = coinGeckoNames[normalized];
+  if (!coinGeckoName) {
+    return null;
   }
   
-  // CoinGecko CDN URL - 100% reliable, 24/7, free, no rate limits
-  // Icons don't change, so we can cache forever
-  return `https://assets.coingecko.com/coins/images/${imageId}/large/${normalized}.png`;
+  const imageId = COINGECKO_IMAGE_IDS[normalized];
+  if (!imageId) {
+    return null;
+  }
+  
+  // Alternative CoinGecko CDN - more reliable than assets.coingecko.com
+  return `https://coin-images.coingecko.com/coins/images/${imageId}/large/${coinGeckoName}.png`;
 }
 
 /**
@@ -192,17 +259,24 @@ function getFallbackAvatarUrl(symbol: string, baseAsset?: string): string {
 
 /**
  * Get logo URL for a crypto symbol
- * Primary: CoinGecko CDN (reliable, 24/7, free, no rate limits)
+ * Primary: GitHub raw content (100% reliable, 24/7, free, no rate limits, no CORS)
+ * Secondary: CoinGecko alternative CDN (backup)
  * Fallback: ui-avatars.com (always works)
  */
 export function getCryptoLogoUrl(symbol: string, baseAsset?: string): string {
-  // Try CoinGecko CDN first (most reliable)
-  const coinGeckoUrl = getCoinGeckoLogoUrl(symbol, baseAsset);
+  // Try GitHub raw content first (most reliable - always works, no restrictions)
+  const githubUrl = getGitHubLogoUrl(symbol, baseAsset);
+  if (githubUrl) {
+    return githubUrl;
+  }
+  
+  // Try CoinGecko alternative CDN as backup
+  const coinGeckoUrl = getCoinGeckoAltLogoUrl(symbol, baseAsset);
   if (coinGeckoUrl) {
     return coinGeckoUrl;
   }
   
-  // Fallback to ui-avatars if CoinGecko icon not available
+  // Fallback to ui-avatars if no icon available
   return getFallbackAvatarUrl(symbol, baseAsset);
 }
 

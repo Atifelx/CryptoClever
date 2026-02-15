@@ -151,11 +151,12 @@ export async function GET(request: NextRequest) {
       const logoUrl = getCryptoLogoUrl(symbolKey, baseAsset);
       
       // Cache in Redis (async, don't block)
-      // CoinGecko icons cache forever (TTL=0), fallback cache for 30 days
+      // GitHub and CoinGecko icons cache forever (TTL=0), fallback cache for 30 days
       getCachedCryptoLogo(symbolKey).then((cached) => {
         if (!cached) {
-          const isCoinGecko = logoUrl.includes('assets.coingecko.com');
-          const ttl = isCoinGecko ? 0 : 2592000; // 0 = no expiry for CoinGecko, 30 days for fallback
+          const isGitHub = logoUrl.includes('raw.githubusercontent.com');
+          const isCoinGecko = logoUrl.includes('coin-images.coingecko.com');
+          const ttl = (isGitHub || isCoinGecko) ? 0 : 2592000; // 0 = no expiry for GitHub/CoinGecko, 30 days for fallback
           cacheCryptoLogo(symbolKey, logoUrl, ttl).catch(() => {});
         }
       }).catch(() => {});
