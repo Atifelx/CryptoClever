@@ -4,9 +4,10 @@
  */
 
 /**
- * CoinGecko coin ID to image ID and name mapping for the 12 trading pairs
- * Using coin-images.coingecko.com CDN - 100% reliable, 24/7, correct official logos
- * Format: https://coin-images.coingecko.com/coins/images/{imageId}/large/{coinName}.png
+ * CoinGecko small icon mapping for ONLY the 12 trading pairs
+ * Using coin-images.coingecko.com CDN - small favicon-style icons (16x16 or 32x32)
+ * Format: https://coin-images.coingecko.com/coins/images/{imageId}/small/{coinName}.png
+ * Only includes the 12 pairs we support - rest will use fallback
  */
 const COINGECKO_ICON_MAP: Record<string, { imageId: number; coinName: string }> = {
   // Market Leaders (5 pairs)
@@ -77,12 +78,13 @@ const COINGECKO_IDS: Record<string, string> = {
 };
 
 /**
- * Get CoinGecko CDN logo URL for a crypto symbol
+ * Get CoinGecko small favicon URL for a crypto symbol
  * coin-images.coingecko.com is 100% reliable, 24/7 available, free, no rate limits
- * Uses official CoinGecko icons with correct logos for all 12 pairs
- * Format: https://coin-images.coingecko.com/coins/images/{imageId}/large/{coinName}.png
+ * Uses small favicon-style icons (16x16 or 32x32) - perfect for sidebar
+ * Format: https://coin-images.coingecko.com/coins/images/{imageId}/small/{coinName}.png
+ * ONLY for the 12 trading pairs we support
  */
-function getCoinGeckoLogoUrl(symbol: string, baseAsset?: string): string | null {
+function getCoinGeckoFaviconUrl(symbol: string, baseAsset?: string): string | null {
   // Use baseAsset if provided, otherwise extract from symbol
   let asset: string;
   if (baseAsset) {
@@ -99,15 +101,16 @@ function getCoinGeckoLogoUrl(symbol: string, baseAsset?: string): string | null 
     return null;
   }
   
-  // Get CoinGecko icon mapping
+  // Get CoinGecko icon mapping - ONLY for our 12 pairs
   const iconData = COINGECKO_ICON_MAP[normalized];
   if (!iconData) {
     return null; // Not in our 12 pairs, use fallback
   }
   
-  // CoinGecko CDN - 100% reliable, 24/7, free, no rate limits, correct official logos
+  // CoinGecko CDN - small favicon icons (16x16 or 32x32) - perfect for sidebar
+  // 100% reliable, 24/7, free, no rate limits, correct official logos
   // Icons don't change, so we can cache forever
-  return `https://coin-images.coingecko.com/coins/images/${iconData.imageId}/large/${iconData.coinName}.png`;
+  return `https://coin-images.coingecko.com/coins/images/${iconData.imageId}/small/${iconData.coinName}.png`;
 }
 
 
@@ -154,17 +157,18 @@ function getFallbackAvatarUrl(symbol: string, baseAsset?: string): string {
   const colorIndex = Math.abs(hash) % colors.length;
   const bgColor = colors[colorIndex];
   
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=${bgColor}&color=fff&size=128&bold=true&format=png`;
+  // Use smaller size for favicon-style (24x24 for sidebar)
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=${bgColor}&color=fff&size=24&bold=true&format=png`;
 }
 
 /**
- * Get logo URL for a crypto symbol
- * Primary: CoinGecko CDN (100% reliable, 24/7, free, correct official logos for all 12 pairs)
+ * Get small favicon URL for a crypto symbol
+ * Primary: CoinGecko small icons (16x16/32x32 favicon-style) - ONLY for 12 pairs
  * Fallback: ui-avatars.com (always works for unsupported symbols)
  */
 export function getCryptoLogoUrl(symbol: string, baseAsset?: string): string {
-  // Try CoinGecko CDN first (most reliable - correct official logos)
-  const coinGeckoUrl = getCoinGeckoLogoUrl(symbol, baseAsset);
+  // Try CoinGecko small favicon first (only for our 12 pairs)
+  const coinGeckoUrl = getCoinGeckoFaviconUrl(symbol, baseAsset);
   if (coinGeckoUrl) {
     return coinGeckoUrl;
   }
