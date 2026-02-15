@@ -63,28 +63,67 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch from Binance API if cache miss
-    const url = `https://api.binance.com/api/v3/klines?symbol=${upperSymbol}&interval=${interval}&limit=${limitNum}`;
+    const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${upperSymbol}&interval=${interval}&limit=${limitNum}`;
     
-    console.log('Fetching from Binance API:', url);
+    console.log('Fetching from Binance API:', binanceUrl);
 
-    // Create abort controller for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    // Helper function to fetch with proxy fallback
+    const fetchWithProxyFallback = async (url: string): Promise<Response> => {
+      // Try direct fetch first
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    // Try with headers that might help bypass restrictions
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.binance.com/',
-        'Origin': 'https://www.binance.com',
-      },
-      signal: controller.signal,
-    });
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.binance.com/',
+            'Origin': 'https://www.binance.com',
+          },
+          signal: controller.signal,
+        });
 
-    clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
+
+        // If 451 error, try proxy
+        if (response.status === 451) {
+          console.log('Binance API blocked (451), trying proxy...');
+          clearTimeout(timeoutId);
+          
+          // Use AllOrigins proxy (free CORS proxy)
+          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+          
+          const proxyController = new AbortController();
+          const proxyTimeout = setTimeout(() => proxyController.abort(), 15000);
+          
+          try {
+            const proxyResponse = await fetch(proxyUrl, {
+              method: 'GET',
+              headers: {
+                'Accept': 'application/json',
+              },
+              signal: proxyController.signal,
+            });
+            
+            clearTimeout(proxyTimeout);
+            return proxyResponse;
+          } catch (proxyError) {
+            clearTimeout(proxyTimeout);
+            throw proxyError;
+          }
+        }
+
+        return response;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+    };
+
+    const response = await fetchWithProxyFallback(binanceUrl);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -99,29 +138,11 @@ export async function GET(request: NextRequest) {
         // Use default error message
       }
       
-      // Handle 451 (Unavailable For Legal Reasons) - geographical restriction
-      if (response.status === 451) {
-        console.error('Binance API 451 error (restricted location):', errorText);
-        return NextResponse.json(
-          { 
-            error: 'Service unavailable from a restricted location according to Binance terms. This may occur when the server is in a restricted region. Please try again later or contact support.',
-            code: 'RESTRICTED_LOCATION',
-            status: 451
-          },
-          { 
-            status: 503, // Return 503 (Service Unavailable) instead of 451 to client
-            headers: {
-              'Access-Control-Allow-Origin': '*',
-            },
-          }
-        );
-      }
-      
       console.error('Binance API error:', response.status, errorText);
       return NextResponse.json(
         { error: errorMessage },
         { 
-          status: response.status >= 500 ? 503 : response.status, // Convert 5xx to 503 for client
+          status: response.status >= 500 ? 503 : response.status,
           headers: {
             'Access-Control-Allow-Origin': '*',
           },
