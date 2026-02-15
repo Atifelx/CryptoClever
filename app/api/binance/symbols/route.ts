@@ -147,13 +147,16 @@ export async function GET(request: NextRequest) {
       const baseAsset = symbol.baseAsset;
       const symbolKey = symbol.symbol;
       
-      // Generate logo URL (ui-avatars is 100% reliable, always works)
+      // Generate logo URL (CoinGecko CDN first, fallback to ui-avatars)
       const logoUrl = getCryptoLogoUrl(symbolKey, baseAsset);
       
       // Cache in Redis (async, don't block)
+      // CoinGecko icons cache forever (TTL=0), fallback cache for 30 days
       getCachedCryptoLogo(symbolKey).then((cached) => {
         if (!cached) {
-          cacheCryptoLogo(symbolKey, logoUrl, 86400).catch(() => {}); // Cache for 24 hours
+          const isCoinGecko = logoUrl.includes('assets.coingecko.com');
+          const ttl = isCoinGecko ? 0 : 2592000; // 0 = no expiry for CoinGecko, 30 days for fallback
+          cacheCryptoLogo(symbolKey, logoUrl, ttl).catch(() => {});
         }
       }).catch(() => {});
       

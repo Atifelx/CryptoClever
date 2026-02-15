@@ -189,7 +189,12 @@ export async function cacheCryptoLogo(symbol: string, logoUrl: string, ttl: numb
   
   try {
     const key = `logo:${symbol.toUpperCase()}`;
-    await redis.setex(key, ttl, logoUrl); // Cache for 24 hours by default
+    // If ttl is 0, cache forever (no expiry) - for CoinGecko icons that don't change
+    if (ttl === 0) {
+      await redis.set(key, logoUrl); // Permanent cache (no expiry)
+    } else {
+      await redis.setex(key, ttl, logoUrl); // Cache with expiry
+    }
   } catch (error) {
     // Silently fail - caching is optional
   }
