@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedCandles, setCachedCandles } from '../../../lib/redis';
+import { fetchCoinGeckoOHLC, isCoinGeckoSupported } from '../../../lib/coingecko';
 
 // Configure runtime to use Node.js with specific regions (configured in vercel.json)
 export const runtime = 'nodejs';
@@ -100,6 +101,44 @@ export async function GET(request: NextRequest) {
         }
       } catch (e) {
         // Use default error message
+      }
+      
+      // If Binance is blocked (451) or unavailable, try CoinGecko as fallback
+      if (response.status === 451 || response.status >= 500) {
+        console.log(`Binance API blocked/unavailable (${response.status}), trying CoinGecko fallback...`);
+        
+        // Check if CoinGecko supports this symbol
+        if (isCoinGeckoSupported(upperSymbol)) {
+          try {
+            console.log(`Fetching ${upperSymbol} ${interval} from CoinGecko...`);
+            const coinGeckoCandles = await fetchCoinGeckoOHLC(upperSymbol, interval, limitNum);
+            
+            if (coinGeckoCandles && coinGeckoCandles.length > 0) {
+              // Cache the CoinGecko data
+              setCachedCandles(upperSymbol, interval, coinGeckoCandles, 300).catch((err) => {
+                console.error('Error caching CoinGecko candles:', err);
+              });
+              
+              console.log(`✅ Successfully fetched ${coinGeckoCandles.length} candles from CoinGecko`);
+              
+              return NextResponse.json(coinGeckoCandles, {
+                headers: {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                  'Access-Control-Allow-Headers': 'Content-Type',
+                  'X-Cache': 'MISS',
+                  'X-Data-Source': 'coingecko',
+                  'Cache-Control': 'no-store, no-cache, must-revalidate',
+                },
+              });
+            }
+          } catch (coinGeckoError) {
+            console.error('CoinGecko fallback also failed:', coinGeckoError);
+            // Continue to return Binance error
+          }
+        } else {
+          console.warn(`CoinGecko does not support symbol: ${upperSymbol}`);
+        }
       }
       
       console.error('Binance API error:', response.status, errorText);

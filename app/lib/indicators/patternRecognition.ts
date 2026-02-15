@@ -1026,6 +1026,11 @@ export function getPatternName(type: PatternType): string {
     SYMMETRICAL_TRIANGLE: 'Symmetrical Triangle',
     RECTANGLE_SUPPORT: 'Rectangle Support',
     RECTANGLE_RESISTANCE: 'Rectangle Resistance',
+    HAMMER: 'Hammer',
+    SHOOTING_STAR: 'Shooting Star',
+    DOJI: 'Doji',
+    BULLISH_ENGULFING: 'Bullish Engulfing',
+    BEARISH_ENGULFING: 'Bearish Engulfing',
   };
   return names[type] || type;
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { detectPatterns } from '../../lib/indicators/patternRecognition';
 import { Candle } from '../../lib/binance';
+import { fetchCoinGeckoOHLC, isCoinGeckoSupported } from '../../lib/coingecko';
 
 /**
  * Pattern Analysis API Route
@@ -28,7 +29,8 @@ try {
 
 async function fetchCandles(symbol: string, interval: string, limit: number = 500): Promise<Candle[]> {
   try {
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+    const upperSymbol = symbol.toUpperCase();
+    const url = `https://api.binance.com/api/v3/klines?symbol=${upperSymbol}&interval=${interval}&limit=${limit}`;
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -42,6 +44,26 @@ async function fetchCandles(symbol: string, interval: string, limit: number = 50
     });
 
     if (!response.ok) {
+      // If Binance is blocked (451) or unavailable, try CoinGecko as fallback
+      if (response.status === 451 || response.status >= 500) {
+        console.log(`Binance API blocked/unavailable (${response.status}), trying CoinGecko fallback...`);
+        
+        if (isCoinGeckoSupported(upperSymbol)) {
+          try {
+            console.log(`Fetching ${upperSymbol} ${interval} from CoinGecko for pattern analysis...`);
+            const coinGeckoCandles = await fetchCoinGeckoOHLC(upperSymbol, interval, limit);
+            
+            if (coinGeckoCandles && coinGeckoCandles.length > 0) {
+              console.log(`✅ Successfully fetched ${coinGeckoCandles.length} candles from CoinGecko`);
+              return coinGeckoCandles as Candle[];
+            }
+          } catch (coinGeckoError) {
+            console.error('CoinGecko fallback also failed:', coinGeckoError);
+            // Continue to return empty array
+          }
+        }
+      }
+      
       throw new Error(`Binance API error: ${response.status}`);
     }
 
