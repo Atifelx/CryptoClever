@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedCandles, setCachedCandles } from '../../../lib/redis';
 
+// Configure runtime to use Node.js with specific regions (configured in vercel.json)
+export const runtime = 'nodejs';
+
 /**
  * Next.js API Route to proxy Binance API requests with Redis caching
  * Caches historical data for faster loading
@@ -63,67 +66,28 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch from Binance API if cache miss
-    const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${upperSymbol}&interval=${interval}&limit=${limitNum}`;
+    const url = `https://api.binance.com/api/v3/klines?symbol=${upperSymbol}&interval=${interval}&limit=${limitNum}`;
     
-    console.log('Fetching from Binance API:', binanceUrl);
+    console.log('Fetching from Binance API:', url);
 
-    // Helper function to fetch with proxy fallback
-    const fetchWithProxyFallback = async (url: string): Promise<Response> => {
-      // Try direct fetch first
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-      try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.binance.com/',
-            'Origin': 'https://www.binance.com',
-          },
-          signal: controller.signal,
-        });
+    // Fetch with proper headers
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.binance.com/',
+        'Origin': 'https://www.binance.com',
+      },
+      signal: controller.signal,
+    });
 
-        clearTimeout(timeoutId);
-
-        // If 451 error, try proxy
-        if (response.status === 451) {
-          console.log('Binance API blocked (451), trying proxy...');
-          clearTimeout(timeoutId);
-          
-          // Use AllOrigins proxy (free CORS proxy)
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-          
-          const proxyController = new AbortController();
-          const proxyTimeout = setTimeout(() => proxyController.abort(), 15000);
-          
-          try {
-            const proxyResponse = await fetch(proxyUrl, {
-              method: 'GET',
-              headers: {
-                'Accept': 'application/json',
-              },
-              signal: proxyController.signal,
-            });
-            
-            clearTimeout(proxyTimeout);
-            return proxyResponse;
-          } catch (proxyError) {
-            clearTimeout(proxyTimeout);
-            throw proxyError;
-          }
-        }
-
-        return response;
-      } catch (error) {
-        clearTimeout(timeoutId);
-        throw error;
-      }
-    };
-
-    const response = await fetchWithProxyFallback(binanceUrl);
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();

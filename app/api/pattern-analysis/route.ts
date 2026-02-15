@@ -29,45 +29,17 @@ try {
 async function fetchCandles(symbol: string, interval: string, limit: number = 500): Promise<Candle[]> {
   try {
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-    
-    // Helper to fetch with proxy fallback
-    const fetchWithProxy = async (targetUrl: string): Promise<Response> => {
-      try {
-        const response = await fetch(targetUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.binance.com/',
-            'Origin': 'https://www.binance.com',
-          },
-          next: { revalidate: 5 }
-        });
-
-        // If 451, try proxy
-        if (response.status === 451) {
-          console.log('Binance API blocked (451), trying proxy...');
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-          return await fetch(proxyUrl, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' },
-          });
-        }
-
-        return response;
-      } catch (error) {
-        // If direct fetch fails, try proxy
-        console.log('Direct fetch failed, trying proxy...');
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-        return await fetch(proxyUrl, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-        });
-      }
-    };
-    
-    const response = await fetchWithProxy(url);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.binance.com/',
+        'Origin': 'https://www.binance.com',
+      },
+      next: { revalidate: 5 }
+    });
 
     if (!response.ok) {
       throw new Error(`Binance API error: ${response.status}`);

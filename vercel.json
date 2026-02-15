@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "app/api/**/*.ts": {
+      "runtime": "nodejs20.x",
+      "regions": ["iad1", "sfo1"]
+    }
+  },
+  "regions": ["iad1"],
+  "crons": []
+}
