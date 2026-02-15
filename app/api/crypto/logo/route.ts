@@ -44,13 +44,12 @@ export async function GET(request: NextRequest) {
     const logoUrl = getCryptoLogoUrl(symbol, baseAsset || undefined);
     
     // Determine source
-    const isGitHub = logoUrl.includes('raw.githubusercontent.com');
     const isCoinGecko = logoUrl.includes('coin-images.coingecko.com');
-    const source = isGitHub ? 'github' : isCoinGecko ? 'coingecko' : 'ui-avatars';
+    const source = isCoinGecko ? 'coingecko' : 'ui-avatars';
 
-    // Cache in Redis - GitHub and CoinGecko icons cache forever (no expiry), fallback cache for 30 days
-    // Since these icons don't change, we can cache them indefinitely
-    const ttl = (isGitHub || isCoinGecko) ? 0 : 2592000; // 0 = no expiry for GitHub/CoinGecko, 30 days for fallback
+    // Cache in Redis - CoinGecko icons cache forever (no expiry), fallback cache for 30 days
+    // Since CoinGecko icons don't change, we can cache them indefinitely
+    const ttl = isCoinGecko ? 0 : 2592000; // 0 = no expiry for CoinGecko, 30 days for fallback
     cacheCryptoLogo(symbol, logoUrl, ttl).catch(() => {});
 
     return NextResponse.json(
@@ -60,8 +59,8 @@ export async function GET(request: NextRequest) {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
-          'Cache-Control': (isGitHub || isCoinGecko)
-            ? 'public, s-maxage=31536000, immutable' // GitHub/CoinGecko icons: cache forever
+          'Cache-Control': isCoinGecko
+            ? 'public, s-maxage=31536000, immutable' // CoinGecko icons: cache forever
             : 'public, s-maxage=2592000, stale-while-revalidate=86400', // Fallback: 30 days
         },
       }
