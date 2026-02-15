@@ -6,7 +6,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runDeepAnalysis, Candle } from '../../lib/engine';
 import redis from '../../lib/redis';
-import { fetchCoinGeckoOHLC, isCoinGeckoSupported } from '../../lib/coingecko';
 
 // Valid timeframes for Binance (matching the app's timeframe selector)
 // Note: App uses '1D' but Binance API expects '1d' (lowercase)
@@ -50,26 +49,6 @@ async function fetchBinanceCandles(
   });
 
   if (!response.ok) {
-    // If Binance is blocked (451) or unavailable, try CoinGecko as fallback
-    if (response.status === 451 || response.status >= 500) {
-      console.log(`Binance API blocked/unavailable (${response.status}), trying CoinGecko fallback...`);
-      
-      if (isCoinGeckoSupported(upperSymbol)) {
-        try {
-          console.log(`Fetching ${upperSymbol} ${interval} from CoinGecko for deep analysis...`);
-          const coinGeckoCandles = await fetchCoinGeckoOHLC(upperSymbol, interval, limit);
-          
-          if (coinGeckoCandles && coinGeckoCandles.length > 0) {
-            console.log(`✅ Successfully fetched ${coinGeckoCandles.length} candles from CoinGecko`);
-            return coinGeckoCandles as Candle[];
-          }
-        } catch (coinGeckoError) {
-          console.error('CoinGecko fallback also failed:', coinGeckoError);
-          // Continue to throw Binance error
-        }
-      }
-    }
-    
     throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
   }
 
