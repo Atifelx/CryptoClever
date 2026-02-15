@@ -84,11 +84,11 @@ export default function SymbolList() {
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <img
-            src={getCryptoLogoUrl(base)}
+            src={getCryptoLogoUrl(symbol, base)}
             alt={name}
             className="w-6 h-6 rounded-full flex-shrink-0"
             onError={(e) => {
-              e.currentTarget.src = getCryptoLogoUrl(base);
+              e.currentTarget.src = getCryptoLogoUrl(symbol, base);
             }}
           />
           <div className="flex flex-col min-w-0 flex-1">
