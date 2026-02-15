@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import TradingChart from './components/Chart/TradingChart';
 import TradingSignalsPanel from './components/Chart/TradingSignalsPanel';
+import IndicatorDashboard from './components/Chart/IndicatorDashboard';
 import SymbolList from './components/Sidebar/SymbolList';
 import SearchBar from './components/Sidebar/SearchBar';
 import TimeframeSelector from './components/Header/TimeframeSelector';
@@ -10,6 +11,9 @@ import Navbar from './components/Header/Navbar';
 import AccountInfo from './components/Footer/AccountInfo';
 import { useTradingStore } from './store/tradingStore';
 import { INDICATOR_REGISTRY } from './lib/indicators/registry';
+import { SemaforPoint } from './lib/indicators/types';
+import type { SemaforTrend } from './lib/indicators/semafor';
+import { PatternSignal } from './lib/indicators/patternRecognition';
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
@@ -72,6 +76,17 @@ export default function Home() {
     });
   };
 
+  // Indicator data state (updated by TradingChart)
+  const [indicatorData, setIndicatorData] = useState<{
+    semaforPoints: SemaforPoint[];
+    semaforTrend: SemaforTrend;
+    patternSignals: PatternSignal[];
+  }>({
+    semaforPoints: [],
+    semaforTrend: { trend: 'NEUTRAL', ema20: 0, ema50: 0 },
+    patternSignals: [],
+  });
+
   // Use safe defaults during SSR
   const safeSymbol = isMounted ? selectedSymbol : 'BTCUSDT';
   const safeTimeframe = isMounted ? selectedTimeframe : '1m';
@@ -102,10 +117,18 @@ export default function Home() {
       <div className="flex-1 flex flex-col">
         {/* Header */}
         <Navbar />
-        <div className="bg-[#1a1a1a] border-b border-gray-800 p-4">
+        <div className="bg-[#1a1a1a] border-b border-gray-800 p-4 space-y-3">
           <TimeframeSelector 
             enabledIndicators={enabledIndicators}
             onToggleIndicator={handleToggleIndicator}
+          />
+          
+          {/* Indicator Dashboard - Compact, just below timeframe buttons */}
+          <IndicatorDashboard
+            enabledIndicators={enabledIndicators}
+            semaforPoints={indicatorData.semaforPoints}
+            semaforTrend={indicatorData.semaforTrend}
+            patternSignals={indicatorData.patternSignals}
           />
         </div>
 
@@ -119,6 +142,7 @@ export default function Home() {
             interval={safeTimeframe}
             enabledIndicators={enabledIndicators}
             onToggleIndicator={handleToggleIndicator}
+            onIndicatorDataUpdate={setIndicatorData}
           />
         </div>
 

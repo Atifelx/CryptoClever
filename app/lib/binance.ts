@@ -166,7 +166,14 @@ export async function fetchBinanceHistory(
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(`Binance API error: ${errorData.error || response.statusText}`);
+      const errorMessage = errorData.error || response.statusText;
+      
+      // Handle restricted location error (451/503)
+      if (response.status === 503 && errorData.code === 'RESTRICTED_LOCATION') {
+        throw new Error(`Binance API error: Service unavailable from a restricted location according to Binance terms. This may occur when the server is in a restricted region. Please try again later or contact support if you believe this is an error.`);
+      }
+      
+      throw new Error(`Binance API error: ${errorMessage}`);
     }
     
     const data = await response.json();

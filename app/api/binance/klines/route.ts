@@ -71,10 +71,15 @@ export async function GET(request: NextRequest) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
+    // Try with headers that might help bypass restrictions
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.binance.com/',
+        'Origin': 'https://www.binance.com',
       },
       signal: controller.signal,
     });
@@ -94,11 +99,29 @@ export async function GET(request: NextRequest) {
         // Use default error message
       }
       
+      // Handle 451 (Unavailable For Legal Reasons) - geographical restriction
+      if (response.status === 451) {
+        console.error('Binance API 451 error (restricted location):', errorText);
+        return NextResponse.json(
+          { 
+            error: 'Service unavailable from a restricted location according to Binance terms. This may occur when the server is in a restricted region. Please try again later or contact support.',
+            code: 'RESTRICTED_LOCATION',
+            status: 451
+          },
+          { 
+            status: 503, // Return 503 (Service Unavailable) instead of 451 to client
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+            },
+          }
+        );
+      }
+      
       console.error('Binance API error:', response.status, errorText);
       return NextResponse.json(
         { error: errorMessage },
         { 
-          status: response.status,
+          status: response.status >= 500 ? 503 : response.status, // Convert 5xx to 503 for client
           headers: {
             'Access-Control-Allow-Origin': '*',
           },

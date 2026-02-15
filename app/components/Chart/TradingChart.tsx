@@ -6,14 +6,23 @@ import { useBinanceWebSocket } from '../../hooks/useBinanceWebSocket';
 import { Candle } from '../../lib/binance';
 import { calculateSemafor, getSemaforTrend } from '../../lib/indicators/semafor';
 import { SemaforPoint } from '../../lib/indicators/types';
-import SemaforOverlay from './SemaforOverlay';
 import type { SemaforTrend } from '../../lib/indicators/semafor';
+import { detectPatterns } from '../../lib/indicators/patternRecognition';
+import { PatternSignal } from '../../lib/indicators/patternRecognition';
+import UnifiedMarkerManager from './UnifiedMarkerManager';
+import CandleSizeControl from './CandleSizeControl';
+import { formatIST } from '../../lib/utils/time';
 
 interface TradingChartProps {
   symbol: string;
   interval: string;
   enabledIndicators: Set<string>;
   onToggleIndicator: (id: string, enabled: boolean) => void;
+  onIndicatorDataUpdate?: (data: {
+    semaforPoints: SemaforPoint[];
+    semaforTrend: SemaforTrend;
+    patternSignals: PatternSignal[];
+  }) => void;
 }
 
 export default function TradingChart({ 
@@ -21,6 +30,7 @@ export default function TradingChart({
   interval,
   enabledIndicators,
   onToggleIndicator,
+  onIndicatorDataUpdate,
 }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -28,6 +38,7 @@ export default function TradingChart({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentPrice, setCurrentPrice] = useState<number>(0);
+  const [candleSize, setCandleSize] = useState<number>(3); // Default barSpacing
   const userInteractedRef = useRef<boolean>(false);
   const isPanningRef = useRef<boolean>(false);
   const panStartXRef = useRef<number>(0);
@@ -71,6 +82,100 @@ export default function TradingChart({
     }
   }, [candles.length, candles[candles.length - 1]?.time, isLoading]);
 
+  // Pattern Recognition with locking mechanism
+  // Only recalculate when a NEW CANDLE CLOSES (not on every WebSocket tick)
+  const lastClosedCandleTimeRef = useRef<number>(0);
+  const lockedPatternRef = useRef<PatternSignal[]>([]);
+
+  const patternSignals = useMemo((): PatternSignal[] => {
+    if (typeof window === 'undefined') return lockedPatternRef.current;
+    if (isLoading || candles.length < 50) return lockedPatternRef.current;
+
+    try {
+      // Only analyze CLOSED candles (exclude forming candle)
+      const closedCandles = candles.slice(0, candles.length - 1);
+      if (closedCandles.length < 50) return lockedPatternRef.current;
+
+      // Get the last CLOSED candle time
+      const lastClosedTime = closedCandles[closedCandles.length - 1]?.time || 0;
+
+      // Only recalculate if a NEW candle has closed (time changed)
+      if (lastClosedTime === lastClosedCandleTimeRef.current) {
+        // No new candle closed - return locked pattern
+        return lockedPatternRef.current;
+      }
+
+      // New candle closed - recalculate patterns
+      lastClosedCandleTimeRef.current = lastClosedTime;
+
+      // Lower threshold for single-candle patterns (Hammer, Doji, etc.) - they're more immediate
+      const newPatterns = detectPatterns(candles, 60); // Lowered to 60% to catch more patterns
+
+      // Only update if we found a valid pattern
+      if (newPatterns.length > 0) {
+        const newPattern = newPatterns[0];
+        const lockedPattern = lockedPatternRef.current[0];
+
+        if (!lockedPattern) {
+          // No locked pattern - lock the new one
+          lockedPatternRef.current = newPatterns;
+          console.log('🔒 Pattern locked:', newPattern.description, `(${newPattern.confidence}%)`);
+          return newPatterns;
+        }
+
+        // Check how old the locked pattern is (in candles)
+        const lockedPatternIndex = closedCandles.findIndex(c => c.time === lockedPattern.time);
+        const newPatternIndex = closedCandles.findIndex(c => c.time === newPattern.time);
+        
+        // If locked pattern is very old (10+ candles), allow replacement
+        const lockedPatternAge = closedCandles.length - 1 - lockedPatternIndex;
+        
+        // Update if:
+        // 1. New pattern is on a different candle AND locked pattern is old (5+ candles), OR
+        // 2. New pattern has significantly higher confidence (+15% not just +10%), OR
+        // 3. Locked pattern is very old (10+ candles) - time to refresh
+        if ((newPattern.time !== lockedPattern.time && lockedPatternAge >= 5) ||
+            (newPattern.confidence >= lockedPattern.confidence + 15) ||
+            (lockedPatternAge >= 10)) {
+          lockedPatternRef.current = newPatterns;
+          console.log('🔒 Pattern updated:', newPattern.description, `(${newPattern.confidence}%) - Old pattern was ${lockedPatternAge} candles old`);
+          return newPatterns;
+        }
+      }
+
+      // Keep locked pattern if new detection is weaker or too recent
+      // This prevents rapid repainting
+      return lockedPatternRef.current;
+    } catch (error) {
+      console.error('Pattern recognition calc error:', error);
+      return lockedPatternRef.current;
+    }
+  }, [
+    symbol,
+    interval,
+    candles.length,
+    // Only depend on the last CLOSED candle time, not the forming candle
+    candles.length > 1 ? candles[candles.length - 2]?.time : 0,
+    isLoading,
+  ]);
+
+  // Reset locked pattern when symbol/interval changes
+  useEffect(() => {
+    lockedPatternRef.current = [];
+    lastClosedCandleTimeRef.current = 0;
+  }, [symbol, interval]);
+
+  // Expose indicator data to parent component
+  useEffect(() => {
+    if (onIndicatorDataUpdate) {
+      onIndicatorDataUpdate({
+        semaforPoints,
+        semaforTrend,
+        patternSignals,
+      });
+    }
+  }, [semaforPoints, semaforTrend, patternSignals, onIndicatorDataUpdate]);
+
   // Initialize chart (only once)
   useEffect(() => {
     if (!chartContainerRef.current || chartRef.current) return;
@@ -90,7 +195,7 @@ export default function TradingChart({
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 0,
-        barSpacing: 3,
+        barSpacing: candleSize,
         fixLeftEdge: false,
         fixRightEdge: false,
         lockVisibleTimeRangeOnResize: false,
@@ -118,6 +223,36 @@ export default function TradingChart({
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
+
+    // Convert time labels to IST using MutationObserver
+    // lightweight-charts renders time labels in the DOM, so we intercept and convert them
+    if (chartContainerRef.current) {
+      const observer = new MutationObserver(() => {
+        // Find all time labels in the chart
+        const timeElements = chartContainerRef.current?.querySelectorAll('[class*="pane"] [class*="time"], [class*="pane"] text') || [];
+        timeElements.forEach((el) => {
+          const text = el.textContent?.trim() || '';
+          // Check if it's a time format (HH:MM or HH:MM:SS)
+          const timeMatch = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+          if (timeMatch) {
+            // This is a time label - we need to convert it from UTC/local to IST
+            // But we don't have the original timestamp, so we'll use a different approach
+            // Instead, we'll rely on the Date prototype override
+          }
+        });
+      });
+
+      // Start observing after a short delay to let the chart render
+      setTimeout(() => {
+        if (chartContainerRef.current) {
+          observer.observe(chartContainerRef.current, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+          });
+        }
+      }, 1000);
+    }
 
     // Pan & Zoom handlers
     const container = chartContainerRef.current;
@@ -198,24 +333,68 @@ export default function TradingChart({
     };
   }, []);
 
+  // Update candle size (barSpacing) when it changes
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.timeScale().applyOptions({
+        barSpacing: candleSize,
+      });
+    }
+  }, [candleSize]);
+
   // Clear chart data on symbol/interval change
   useEffect(() => {
     if (prevSymbolRef.current !== symbol || prevIntervalRef.current !== interval) {
-      try {
-        if (candleSeriesRef.current) candleSeriesRef.current.setData([]);
-        if (volumeSeriesRef.current) volumeSeriesRef.current.setData([]);
-      } catch {}
+      console.log('🔄 Symbol/Interval changed, clearing chart:', { 
+        oldSymbol: prevSymbolRef.current, 
+        newSymbol: symbol,
+        oldInterval: prevIntervalRef.current,
+        newInterval: interval 
+      });
       
+      try {
+        // Clear all chart data
+        if (candleSeriesRef.current) {
+          candleSeriesRef.current.setData([]);
+        }
+        if (volumeSeriesRef.current) {
+          volumeSeriesRef.current.setData([]);
+        }
+      } catch (error) {
+        console.warn('Error clearing chart data:', error);
+      }
+      
+      // Reset all state
       setCurrentPrice(0);
       setLoading(true);
       userInteractedRef.current = false;
+      prevCandlesLenRef.current = 0; // CRITICAL: Reset to force setData() on next load
+      
+      // Update refs
       prevSymbolRef.current = symbol;
       prevIntervalRef.current = interval;
-      prevCandlesLenRef.current = 0; // Force setData() on next load
 
+      // Reset time scale and force chart refresh
       try {
-        if (chartRef.current) chartRef.current.timeScale().resetTimeScale();
-      } catch {}
+        if (chartRef.current) {
+          chartRef.current.timeScale().resetTimeScale();
+          
+          // Force chart resize to ensure it's visible
+          if (chartContainerRef.current) {
+            requestAnimationFrame(() => {
+              if (chartRef.current && chartContainerRef.current) {
+                chartRef.current.applyOptions({
+                  width: chartContainerRef.current.clientWidth,
+                  height: chartContainerRef.current.clientHeight || 600,
+                });
+                console.log('✅ Chart resized after symbol change');
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('Error resetting time scale:', error);
+      }
     }
   }, [symbol, interval]);
 
@@ -223,7 +402,10 @@ export default function TradingChart({
   // CRITICAL: Use setData() only on initial load / symbol change
   // Use update() for real-time WebSocket ticks (faster, preserves markers)
   useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) {
+      console.log('⚠️ Chart series not ready, skipping update');
+      return;
+    }
 
     if (candles.length === 0) {
       setLoading(isLoading);
@@ -231,14 +413,38 @@ export default function TradingChart({
       return;
     }
 
-    if (candles.length > 0) setLoading(false);
+    if (candles.length > 0) {
+      setLoading(false);
+    }
 
     try {
       const prevLen = prevCandlesLenRef.current;
       const isInitialLoad = prevLen === 0;
       const hasNewCandle = candles.length !== prevLen;
+      
+      // Check if symbol/interval changed by comparing with current values
+      // This ensures we detect changes even if refs were updated in previous effect
+      const currentSymbol = symbol;
+      const currentInterval = interval;
+      const symbolChanged = prevSymbolRef.current !== currentSymbol;
+      const intervalChanged = prevIntervalRef.current !== currentInterval;
+      const isSymbolChange = symbolChanged || intervalChanged;
 
-      if (isInitialLoad || hasNewCandle) {
+      // CRITICAL: Always use setData() if:
+      // 1. Initial load (prevLen === 0)
+      // 2. Symbol/interval changed (force full refresh)
+      // 3. New candle added (length changed)
+      if (isInitialLoad || isSymbolChange || hasNewCandle) {
+        console.log('📊 Updating chart data:', {
+          isInitialLoad,
+          isSymbolChange,
+          hasNewCandle,
+          candleCount: candles.length,
+          prevLen,
+          symbol,
+          interval
+        });
+
         // Full data replacement: initial load, new candle added, or symbol change
         const candlestickData = candles.map((c: Candle) => ({
           time: c.time as Time,
@@ -255,20 +461,68 @@ export default function TradingChart({
         }));
 
         if (candlestickData.length > 0) {
-          candleSeriesRef.current.setData(candlestickData);
-          volumeSeriesRef.current.setData(volumeData);
+          // CRITICAL: Always set data when symbol changes or initial load
+          try {
+            candleSeriesRef.current.setData(candlestickData);
+            volumeSeriesRef.current.setData(volumeData);
+            console.log('✅ Chart data set:', { count: candlestickData.length, symbol, interval });
+          } catch (error) {
+            console.error('❌ Error setting chart data:', error);
+            // Force chart refresh on error
+            if (chartRef.current && chartContainerRef.current) {
+              try {
+                chartRef.current.applyOptions({
+                  width: chartContainerRef.current.clientWidth,
+                  height: chartContainerRef.current.clientHeight || 600,
+                });
+              } catch (e) {
+                console.error('Error refreshing chart:', e);
+              }
+            }
+          }
+          
+          // Update current price
+          const lastCandle = candles[candles.length - 1];
+          if (lastCandle) {
+            setCurrentPrice(lastCandle.close);
+          }
 
-          if (!userInteractedRef.current) {
+          // Fit content if user hasn't interacted or symbol changed
+          if (!userInteractedRef.current || isSymbolChange) {
+            // Use multiple requestAnimationFrame for better reliability
             requestAnimationFrame(() => {
-              setTimeout(() => {
-                try {
-                  if (chartRef.current && candlestickData.length > 0) {
-                    chartRef.current.timeScale().fitContent();
+              requestAnimationFrame(() => {
+                setTimeout(() => {
+                  try {
+                    if (chartRef.current && candlestickData.length > 0) {
+                      chartRef.current.timeScale().fitContent();
+                      // Force a resize to ensure chart renders
+                      if (chartContainerRef.current) {
+                        chartRef.current.applyOptions({
+                          width: chartContainerRef.current.clientWidth,
+                          height: chartContainerRef.current.clientHeight || 600,
+                        });
+                      }
+                      console.log('✅ Chart data updated, fitted, and refreshed');
+                    }
+                  } catch (error) {
+                    console.warn('Error fitting content:', error);
                   }
-                } catch {}
-              }, 50);
+                }, 150); // Increased delay to ensure chart is ready
+              });
             });
           }
+          
+          // Update previous length AFTER setting data
+          prevCandlesLenRef.current = candles.length;
+          
+          // Update symbol/interval refs AFTER data is set (for next comparison)
+          if (isSymbolChange) {
+            prevSymbolRef.current = currentSymbol;
+            prevIntervalRef.current = currentInterval;
+          }
+        } else {
+          console.warn('⚠️ No candlestick data to set');
         }
       } else {
         // Real-time tick update: only update the last candle (fast, preserves markers)
@@ -286,19 +540,19 @@ export default function TradingChart({
             value: lastCandle.volume || 0,
             color: lastCandle.close >= lastCandle.open ? '#26a69a80' : '#ef535080',
           });
+          
+          // Update current price for real-time updates
+          setCurrentPrice(lastCandle.close);
+          
+          // Update previous length
+          prevCandlesLenRef.current = candles.length;
         }
-      }
-
-      prevCandlesLenRef.current = candles.length;
-
-      if (candles.length > 0) {
-        setCurrentPrice(candles[candles.length - 1].close);
       }
     } catch (error) {
       console.error('Chart data error:', error);
       setLoading(false);
     }
-  }, [candles, isLoading]);
+  }, [candles, isLoading, symbol, interval]); // CRITICAL: Include symbol and interval to re-run on symbol change
 
   const isEnabled = (id: string) => enabledIndicators.has(id);
 
@@ -363,6 +617,9 @@ export default function TradingChart({
           </div>
         )}
         
+        {/* Candle Size Control - Top Middle */}
+        <CandleSizeControl size={candleSize} onSizeChange={setCandleSize} />
+
         {/* Price display */}
         <div className="absolute top-4 right-4 z-10">
           <div className="bg-[#2a2a2a] px-4 py-2 rounded border border-[#3a3a3a]">
@@ -380,43 +637,15 @@ export default function TradingChart({
         {/* Chart container */}
         <div ref={chartContainerRef} className="w-full h-full" />
         
-        {/* Semafor Overlay */}
-        {candleSeriesRef.current && isEnabled('semafor') && (
-          <SemaforOverlay 
+        {/* Unified Marker Manager - Merges markers from all indicators */}
+        {candleSeriesRef.current && (
+          <UnifiedMarkerManager
             candleSeries={candleSeriesRef.current}
-            points={semaforPoints}
-            visible={true}
+            semaforPoints={isEnabled('semafor') ? semaforPoints : []}
+            patternSignals={isEnabled('patternRecognition') ? patternSignals : []}
+            showSemafor={isEnabled('semafor')}
+            showPatternRecognition={isEnabled('patternRecognition')}
           />
-        )}
-      </div>
-      
-      {/* Indicator info */}
-      <div className="p-4 space-y-3 border-t border-gray-800 bg-[#1a1a1a]">
-        {isEnabled('semafor') && (
-          <div className="bg-[#1a1a1a] border border-gray-800 rounded-lg p-3">
-            <div className="text-white font-semibold text-sm flex items-center gap-2">
-              Semafor
-              <span className="px-2 py-0.5 bg-teal-600/20 text-teal-500 text-xs rounded">ON</span>
-              <span className={`px-2 py-0.5 text-xs rounded font-semibold ${
-                semaforTrend.trend === 'BULL' ? 'bg-green-600/20 text-green-400' :
-                semaforTrend.trend === 'BEAR' ? 'bg-red-600/20 text-red-400' :
-                'bg-gray-600/20 text-gray-400'
-              }`}>
-                {semaforTrend.trend === 'BULL' ? '↑ Uptrend' : semaforTrend.trend === 'BEAR' ? '↓ Downtrend' : '→ Neutral'}
-              </span>
-              <span className="text-[10px] text-gray-600">No-Repaint</span>
-            </div>
-            <div className="text-xs text-gray-500 mt-1">
-              {semaforPoints.filter(p => !p.isLive).length} pivots • 
-              <span className="text-orange-400 ml-1">{semaforPoints.filter(p => p.type === 'high' && !p.isLive).length} sells</span>
-              <span className="text-green-400 ml-1">{semaforPoints.filter(p => p.type === 'low' && !p.isLive).length} buys</span>
-              {semaforPoints.filter(p => p.isLive).length > 0 && (
-                <span className="ml-2 px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-[10px] font-semibold">
-                  📍 {semaforPoints.filter(p => p.isLive).map(p => p.pattern).join(', ')}
-                </span>
-              )}
-            </div>
-          </div>
         )}
       </div>
     </div>

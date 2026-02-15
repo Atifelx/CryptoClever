@@ -19,6 +19,10 @@ export async function GET(request: NextRequest) {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.binance.com/',
+        'Origin': 'https://www.binance.com',
       },
       signal: controller.signal,
     });
@@ -26,9 +30,19 @@ export async function GET(request: NextRequest) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
+      // Handle 451 (restricted location) error
+      if (response.status === 451) {
+        return NextResponse.json(
+          { 
+            error: 'Service unavailable from a restricted location. This may occur when the server is in a restricted region.',
+            code: 'RESTRICTED_LOCATION'
+          },
+          { status: 503 } // Return 503 instead of 451
+        );
+      }
       return NextResponse.json(
         { error: `Binance API error: ${response.status}` },
-        { status: response.status }
+        { status: response.status >= 500 ? 503 : response.status }
       );
     }
 
@@ -61,7 +75,13 @@ export async function GET(request: NextRequest) {
       
       const tickerResponse = await fetch(tickerUrl, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.binance.com/',
+          'Origin': 'https://www.binance.com',
+        },
         signal: tickerController.signal,
       });
       

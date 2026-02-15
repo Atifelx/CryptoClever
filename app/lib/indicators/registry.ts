@@ -26,6 +26,16 @@ export const INDICATOR_REGISTRY: Record<string, IndicatorConfig> = {
     hasSettings: true,
     icon: '🔴',
   },
+  // Pattern Recognition
+  patternRecognition: {
+    id: 'patternRecognition',
+    name: 'Pattern Recognition',
+    category: 'support-resistance',
+    description: 'Detects chart patterns: Double Bottom/Top, Head & Shoulders, Triangles',
+    defaultEnabled: false,
+    hasSettings: true,
+    icon: '📊',
+  },
 };
 
 /**

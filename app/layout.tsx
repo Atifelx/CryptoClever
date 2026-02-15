@@ -17,6 +17,94 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        {/* Set default timezone to Indian Standard Time (GMT+5:30) - MUST RUN FIRST */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              // CRITICAL: Override default timezone to IST for ALL date formatting
+              // This must run before any other scripts
+              (function() {
+                'use strict';
+                
+                // Store original methods
+                const originalToLocaleString = Date.prototype.toLocaleString;
+                const originalToLocaleTimeString = Date.prototype.toLocaleTimeString;
+                const originalToLocaleDateString = Date.prototype.toLocaleDateString;
+                const originalToString = Date.prototype.toString;
+                const originalIntlDateTimeFormat = Intl.DateTimeFormat;
+                
+                // Helper to convert UTC to IST
+                function toIST(date) {
+                  const utcTime = date.getTime();
+                  const istOffset = 5.5 * 60 * 60 * 1000; // GMT+5:30
+                  return new Date(utcTime + istOffset);
+                }
+                
+                // Override Intl.DateTimeFormat to force IST timezone
+                // This is what lightweight-charts uses internally for time formatting
+                const OriginalDateTimeFormat = Intl.DateTimeFormat;
+                Intl.DateTimeFormat = function(locales, options) {
+                  const opts = options ? { ...options } : {};
+                  // Force IST timezone if not specified
+                  if (!opts.timeZone) {
+                    opts.timeZone = 'Asia/Kolkata';
+                  }
+                  return new OriginalDateTimeFormat(locales || 'en-IN', opts);
+                };
+                
+                // Copy static methods and properties
+                Object.setPrototypeOf(Intl.DateTimeFormat, OriginalDateTimeFormat);
+                if (OriginalDateTimeFormat.supportedLocalesOf) {
+                  Intl.DateTimeFormat.supportedLocalesOf = OriginalDateTimeFormat.supportedLocalesOf;
+                }
+                
+                // Override toLocaleString to use IST by default
+                Date.prototype.toLocaleString = function(locales, options) {
+                  const opts = { ...options };
+                  if (!opts.timeZone) {
+                    opts.timeZone = 'Asia/Kolkata';
+                  }
+                  // Convert to IST before formatting
+                  const istDate = toIST(this);
+                  return originalToLocaleString.call(istDate, locales || 'en-IN', opts);
+                };
+                
+                // Override toLocaleTimeString to use IST by default
+                Date.prototype.toLocaleTimeString = function(locales, options) {
+                  const opts = { ...options };
+                  if (!opts.timeZone) {
+                    opts.timeZone = 'Asia/Kolkata';
+                  }
+                  const istDate = toIST(this);
+                  return originalToLocaleTimeString.call(istDate, locales || 'en-IN', opts);
+                };
+                
+                // Override toLocaleDateString to use IST by default
+                Date.prototype.toLocaleDateString = function(locales, options) {
+                  const opts = { ...options };
+                  if (!opts.timeZone) {
+                    opts.timeZone = 'Asia/Kolkata';
+                  }
+                  const istDate = toIST(this);
+                  return originalToLocaleDateString.call(istDate, locales || 'en-IN', opts);
+                };
+                
+                // Also override toString to show IST
+                Date.prototype.toString = function() {
+                  const istDate = toIST(this);
+                  const hours = istDate.getUTCHours().toString().padStart(2, '0');
+                  const minutes = istDate.getUTCMinutes().toString().padStart(2, '0');
+                  const day = istDate.getUTCDate().toString().padStart(2, '0');
+                  const month = (istDate.getUTCMonth() + 1).toString().padStart(2, '0');
+                  const year = istDate.getUTCFullYear();
+                  return \`\${day}/\${month}/\${year} \${hours}:\${minutes} IST\`;
+                };
+                
+                console.log('✅ IST timezone override applied (GMT+5:30)');
+              })();
+            `,
+          }}
+        />
         {/* Prevent browser caching permanently */}
         <meta httpEquiv="Cache-Control" content="no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" />
         <meta httpEquiv="Pragma" content="no-cache" />

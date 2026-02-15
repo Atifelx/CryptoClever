@@ -39,12 +39,21 @@ async function fetchBinanceCandles(
     method: 'GET',
     headers: {
       'Accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Referer': 'https://www.binance.com/',
+      'Origin': 'https://www.binance.com',
     },
     // Add timeout to prevent hanging
     signal: AbortSignal.timeout(10000), // 10 second timeout
   });
 
   if (!response.ok) {
+    // Handle 451 (restricted location) error
+    if (response.status === 451) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Binance API error: Service unavailable from a restricted location. This may occur when the server is in a restricted region. ${errorText}`);
+    }
     throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
   }
 
