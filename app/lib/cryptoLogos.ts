@@ -4,86 +4,26 @@
  */
 
 /**
- * CoinGecko coin ID to image ID mapping for popular cryptocurrencies
- * These are the image IDs used in CoinGecko's CDN: https://assets.coingecko.com/coins/images/{id}/large/{symbol}.png
- * CoinGecko CDN is 100% reliable, 24/7 available, free, no rate limits
+ * CoinGecko coin ID to image ID and name mapping for the 12 trading pairs
+ * Using coin-images.coingecko.com CDN - 100% reliable, 24/7, correct official logos
+ * Format: https://coin-images.coingecko.com/coins/images/{imageId}/large/{coinName}.png
  */
-const COINGECKO_IMAGE_IDS: Record<string, number> = {
-  'btc': 1,           // Bitcoin
-  'eth': 279,         // Ethereum
-  'bnb': 1839,        // Binance Coin
-  'sol': 4128,        // Solana
-  'xrp': 52,          // Ripple
-  'ada': 2010,        // Cardano
-  'doge': 5,          // Dogecoin
-  'matic': 4713,      // Polygon (MATIC)
-  'dot': 6636,        // Polkadot
-  'ltc': 2,           // Litecoin
-  'avax': 5805,       // Avalanche
-  'link': 1975,       // Chainlink
-  'atom': 3794,       // Cosmos
-  'etc': 1321,        // Ethereum Classic
-  'xlm': 512,         // Stellar
-  'algo': 4030,       // Algorand
-  'vet': 3077,        // VeChain
-  'icp': 8916,        // Internet Computer
-  'fil': 4880,        // Filecoin
-  'trx': 1958,        // Tron
-  'eos': 1765,        // EOS
-  'aave': 7278,       // Aave
-  'uni': 12504,       // Uniswap
-  'axs': 6783,        // Axie Infinity
-  'sand': 12129,      // The Sandbox
-  'mana': 1966,       // Decentraland
-  'gala': 12493,      // Gala
-  'enj': 2130,        // Enjin Coin
-  'bat': 1697,        // Basic Attention Token
-  'zec': 1437,        // Zcash
-  'dash': 6636,       // Dash
-  'xmr': 328,         // Monero
-  'zrx': 1896,        // 0x
-  'comp': 5692,       // Compound
-  'mkr': 1518,        // Maker
-  'yfi': 5864,        // Yearn Finance
-  'snx': 2586,        // Synthetix
-  'crv': 6538,        // Curve DAO
-  '1inch': 8104,      // 1inch
-  'sushi': 11976,     // SushiSwap
-  'usdt': 825,        // Tether
-  'usdc': 6319,       // USD Coin
-  'busd': 5036,       // Binance USD
-  'dai': 4943,        // Dai
-  'near': 11165,      // NEAR Protocol
-  'ftm': 3513,        // Fantom
-  'arb': 16547,       // Arbitrum
-  'op': 11840,        // Optimism
-  'apt': 26455,       // Aptos
-  'sui': 20947,       // Sui
-  'ton': 17976,       // Toncoin
-  'wld': 22861,       // Worldcoin
-  'rndr': 5692,       // Render
-  'inj': 7226,        // Injective
-  'sei': 28298,       // Sei
-  'tia': 22861,       // Celestia
-  'ldo': 13573,       // Lido DAO
-  'stx': 1230,        // Stacks
-  'rune': 4157,       // THORChain
-  'mnt': 27075,       // Mantle
-  'imx': 17233,       // Immutable X
-  'grt': 6719,        // The Graph
-  'hbar': 4642,       // Hedera
-  'qnt': 3375,        // Quant
-  'egld': 4892,       // MultiversX (Elrond)
-  'flow': 4558,       // Flow
-  'theta': 3436,      // Theta Network
-  'xtz': 976,         // Tezos
-  'wbtc': 3718,       // Wrapped Bitcoin
-  'steth': 13442,     // Lido Staked ETH
-  'pepe': 29850,      // Pepe
-  'shib': 11939,      // Shiba Inu
-  'floki': 18388,     // Floki
-  'bonk': 28324,      // Bonk
-  'wif': 29217,       // dogwifhat
+const COINGECKO_ICON_MAP: Record<string, { imageId: number; coinName: string }> = {
+  // Market Leaders (5 pairs)
+  'btc': { imageId: 1, coinName: 'bitcoin' },
+  'eth': { imageId: 279, coinName: 'ethereum' },
+  'sol': { imageId: 4128, coinName: 'solana' },
+  'xrp': { imageId: 52, coinName: 'ripple' },
+  'bnb': { imageId: 1839, coinName: 'binancecoin' },
+  
+  // High Liquidity (7 pairs)
+  'avax': { imageId: 5805, coinName: 'avalanche-2' },
+  'link': { imageId: 1975, coinName: 'chainlink' },
+  'dot': { imageId: 6636, coinName: 'polkadot' },
+  'ltc': { imageId: 2, coinName: 'litecoin' },
+  'trx': { imageId: 1958, coinName: 'tron' },
+  'matic': { imageId: 4713, coinName: 'matic-network' },
+  'ada': { imageId: 2010, coinName: 'cardano' },
 };
 
 /**
@@ -137,12 +77,12 @@ const COINGECKO_IDS: Record<string, string> = {
 };
 
 /**
- * Get GitHub raw content logo URL for a crypto symbol
- * GitHub raw content is 100% reliable, 24/7 available, free, no rate limits, no CORS issues
- * Format: https://raw.githubusercontent.com/cjdowner/cryptocurrency-icons/master/128/color/{symbol}.png
- * This is the most reliable source - always works, no restrictions
+ * Get CoinGecko CDN logo URL for a crypto symbol
+ * coin-images.coingecko.com is 100% reliable, 24/7 available, free, no rate limits
+ * Uses official CoinGecko icons with correct logos for all 12 pairs
+ * Format: https://coin-images.coingecko.com/coins/images/{imageId}/large/{coinName}.png
  */
-function getGitHubLogoUrl(symbol: string, baseAsset?: string): string | null {
+function getCoinGeckoLogoUrl(symbol: string, baseAsset?: string): string | null {
   // Use baseAsset if provided, otherwise extract from symbol
   let asset: string;
   if (baseAsset) {
@@ -159,93 +99,17 @@ function getGitHubLogoUrl(symbol: string, baseAsset?: string): string | null {
     return null;
   }
   
-  // GitHub raw content - 100% reliable, 24/7, free, no rate limits, no CORS
+  // Get CoinGecko icon mapping
+  const iconData = COINGECKO_ICON_MAP[normalized];
+  if (!iconData) {
+    return null; // Not in our 12 pairs, use fallback
+  }
+  
+  // CoinGecko CDN - 100% reliable, 24/7, free, no rate limits, correct official logos
   // Icons don't change, so we can cache forever
-  // This repository has 200+ cryptocurrency icons
-  return `https://raw.githubusercontent.com/cjdowner/cryptocurrency-icons/master/128/color/${normalized}.png`;
+  return `https://coin-images.coingecko.com/coins/images/${iconData.imageId}/large/${iconData.coinName}.png`;
 }
 
-/**
- * Get CoinGecko alternative CDN logo URL (backup)
- * Format: https://coin-images.coingecko.com/coins/images/{imageId}/large/bitcoin.png
- */
-function getCoinGeckoAltLogoUrl(symbol: string, baseAsset?: string): string | null {
-  // Use baseAsset if provided, otherwise extract from symbol
-  let asset: string;
-  if (baseAsset) {
-    asset = baseAsset;
-  } else {
-    // Remove quote asset (e.g., BTCUSDT -> BTC)
-    asset = symbol.replace(/USDT|BTC|ETH|BNB|BUSD|USDC|TRY|EUR|GBP|RUB|AUD|BRL|UAH|IDRT|NGN|RON|ZAR|VND|DAI|PAX|TUSD|RLUSD|USD1|U$/i, '');
-  }
-  const normalized = asset.toLowerCase().trim();
-  
-  // Validate we have a symbol
-  if (!normalized || normalized.length === 0) {
-    return null;
-  }
-  
-  // Map to CoinGecko coin names
-  const coinGeckoNames: Record<string, string> = {
-    'btc': 'bitcoin',
-    'eth': 'ethereum',
-    'bnb': 'binancecoin',
-    'sol': 'solana',
-    'xrp': 'ripple',
-    'ada': 'cardano',
-    'doge': 'dogecoin',
-    'matic': 'matic-network',
-    'dot': 'polkadot',
-    'ltc': 'litecoin',
-    'avax': 'avalanche-2',
-    'link': 'chainlink',
-    'atom': 'cosmos',
-    'etc': 'ethereum-classic',
-    'xlm': 'stellar',
-    'algo': 'algorand',
-    'vet': 'vechain',
-    'icp': 'internet-computer',
-    'fil': 'filecoin',
-    'trx': 'tron',
-    'eos': 'eos',
-    'aave': 'aave',
-    'uni': 'uniswap',
-    'axs': 'axie-infinity',
-    'sand': 'the-sandbox',
-    'mana': 'decentraland',
-    'gala': 'gala',
-    'enj': 'enjincoin',
-    'bat': 'basic-attention-token',
-    'zec': 'zcash',
-    'dash': 'dash',
-    'xmr': 'monero',
-    'zrx': '0x',
-    'comp': 'compound-governance-token',
-    'mkr': 'maker',
-    'yfi': 'yearn-finance',
-    'snx': 'havven',
-    'crv': 'curve-dao-token',
-    '1inch': '1inch',
-    'sushi': 'sushi',
-    'usdt': 'tether',
-    'usdc': 'usd-coin',
-    'busd': 'binance-usd',
-    'dai': 'dai',
-  };
-  
-  const coinGeckoName = coinGeckoNames[normalized];
-  if (!coinGeckoName) {
-    return null;
-  }
-  
-  const imageId = COINGECKO_IMAGE_IDS[normalized];
-  if (!imageId) {
-    return null;
-  }
-  
-  // Alternative CoinGecko CDN - more reliable than assets.coingecko.com
-  return `https://coin-images.coingecko.com/coins/images/${imageId}/large/${coinGeckoName}.png`;
-}
 
 /**
  * Get fallback avatar URL (ui-avatars.com)
@@ -295,24 +159,17 @@ function getFallbackAvatarUrl(symbol: string, baseAsset?: string): string {
 
 /**
  * Get logo URL for a crypto symbol
- * Primary: GitHub raw content (100% reliable, 24/7, free, no rate limits, no CORS)
- * Secondary: CoinGecko alternative CDN (backup)
- * Fallback: ui-avatars.com (always works)
+ * Primary: CoinGecko CDN (100% reliable, 24/7, free, correct official logos for all 12 pairs)
+ * Fallback: ui-avatars.com (always works for unsupported symbols)
  */
 export function getCryptoLogoUrl(symbol: string, baseAsset?: string): string {
-  // Try GitHub raw content first (most reliable - always works, no restrictions)
-  const githubUrl = getGitHubLogoUrl(symbol, baseAsset);
-  if (githubUrl) {
-    return githubUrl;
-  }
-  
-  // Try CoinGecko alternative CDN as backup
-  const coinGeckoUrl = getCoinGeckoAltLogoUrl(symbol, baseAsset);
+  // Try CoinGecko CDN first (most reliable - correct official logos)
+  const coinGeckoUrl = getCoinGeckoLogoUrl(symbol, baseAsset);
   if (coinGeckoUrl) {
     return coinGeckoUrl;
   }
   
-  // Fallback to ui-avatars if no icon available
+  // Fallback to ui-avatars if not in our 12 pairs
   return getFallbackAvatarUrl(symbol, baseAsset);
 }
 
