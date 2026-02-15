@@ -3,11 +3,59 @@ import { getCryptoLogoUrl } from '../../../lib/cryptoLogos';
 import { getCachedCryptoLogo, cacheCryptoLogo } from '../../../lib/redis';
 
 /**
+ * Pre-cache all 12 curated trading pair icons in Redis
+ * This ensures all icons are always available in cache
+ */
+async function preCacheCuratedIcons() {
+  const curatedPairs = [
+    { symbol: 'BTCUSDT', base: 'BTC' },
+    { symbol: 'ETHUSDT', base: 'ETH' },
+    { symbol: 'SOLUSDT', base: 'SOL' },
+    { symbol: 'XRPUSDT', base: 'XRP' },
+    { symbol: 'BNBUSDT', base: 'BNB' },
+    { symbol: 'AVAXUSDT', base: 'AVAX' },
+    { symbol: 'LINKUSDT', base: 'LINK' },
+    { symbol: 'DOTUSDT', base: 'DOT' },
+    { symbol: 'LTCUSDT', base: 'LTC' },
+    { symbol: 'TRXUSDT', base: 'TRX' },
+    { symbol: 'MATICUSDT', base: 'MATIC' },
+    { symbol: 'ADAUSDT', base: 'ADA' },
+  ];
+
+  // Pre-cache all 12 icons in parallel
+  const cachePromises = curatedPairs.map(async ({ symbol, base }) => {
+    try {
+      // Check if already cached
+      const cached = await getCachedCryptoLogo(symbol);
+      if (cached) return; // Already cached, skip
+
+      // Generate logo URL
+      const logoUrl = getCryptoLogoUrl(symbol, base);
+      
+      // Cache in Redis (permanent for CoinGecko icons)
+      const isCoinGecko = logoUrl.includes('coin-images.coingecko.com');
+      const ttl = isCoinGecko ? 0 : 2592000; // 0 = no expiry for CoinGecko, 30 days for fallback
+      await cacheCryptoLogo(symbol, logoUrl, ttl);
+      console.log(`✅ Pre-cached icon for ${symbol} (${base}): ${logoUrl}`);
+    } catch (error) {
+      // Silently fail - caching is optional
+      console.warn(`⚠️ Failed to pre-cache icon for ${symbol}:`, error);
+    }
+  });
+
+  // Wait for all icons to be cached (don't block the request)
+  Promise.all(cachePromises).catch(() => {});
+}
+
+/**
  * API Route to fetch all available trading pairs from Binance
  * Returns all active trading pairs categorized by quote currency
  */
 export async function GET(request: NextRequest) {
   try {
+    // Pre-cache all 12 curated icons in Redis (async, don't block)
+    preCacheCuratedIcons();
+
     // Fetch exchange info from Binance
     const url = 'https://api.binance.com/api/v3/exchangeInfo';
     
