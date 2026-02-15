@@ -18,9 +18,14 @@ export function useBinanceWebSocket(symbol: string, timeframe: string) {
   const [isLoading, setIsLoading] = useState(true);
   const wsRef = useRef<BinanceWebSocket | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastSymbolRef = useRef<string>(symbol);
+  const lastTimeframeRef = useRef<string>(timeframe);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { updateTradingData } = useTradingStore();
 
   useEffect(() => {
+    console.log('🔄 Symbol/Interval changed:', { symbol, timeframe });
+    
     let isMounted = true;
     let timeoutId: NodeJS.Timeout;
     // Map '1D' to '1d' for Binance API
@@ -32,7 +37,8 @@ export function useBinanceWebSocket(symbol: string, timeframe: string) {
     }
     abortControllerRef.current = new AbortController();
 
-    // Clear previous data immediately when symbol/interval changes
+    // CRITICAL: Clear old data immediately
+    console.log('🗑️ Clearing old candles');
     setCandles([]);
     setIsLoading(true);
 
@@ -40,6 +46,7 @@ export function useBinanceWebSocket(symbol: string, timeframe: string) {
     const cleanupWebSocket = () => {
       if (wsRef.current) {
         try {
+          console.log('📤 Disconnecting old WebSocket');
           wsRef.current.disconnect();
         } catch (error) {
           console.warn('Error disconnecting WebSocket:', error);
@@ -57,14 +64,20 @@ export function useBinanceWebSocket(symbol: string, timeframe: string) {
         setIsLoading(true);
 
         // Fetch historical data first with abort signal
+        console.log('📥 Fetching historical data for:', { symbol, interval });
         const history = await fetchBinanceHistory(symbol, interval, 500, abortControllerRef.current?.signal);
         
         if (!isMounted || abortControllerRef.current?.signal.aborted) {
+          console.log('⚠️ Fetch aborted or unmounted');
           return;
         }
 
         // Only set data if we got valid history
         if (history && history.length > 0) {
+          console.log('✅ Fetched historical data:', {
+            symbol,
+            candles: history.length
+          });
           setCandles(history);
           
           // Update current price
@@ -161,6 +174,109 @@ export function useBinanceWebSocket(symbol: string, timeframe: string) {
       cleanupWebSocket();
     };
   }, [symbol, timeframe, updateTradingData]);
+
+  // Auto-refresh when tab becomes visible (within 1 second)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      // Only refresh if tab becomes visible (not when hidden)
+      if (document.visibilityState === 'visible') {
+        console.log('👁️ Tab became visible - Refreshing chart state...');
+        
+        // Clear any pending refresh
+        if (refreshTimeoutRef.current) {
+          clearTimeout(refreshTimeoutRef.current);
+        }
+        
+        // Refresh within 1 second as requested
+        refreshTimeoutRef.current = setTimeout(() => {
+          // Only refresh if symbol/timeframe haven't changed
+          if (lastSymbolRef.current === symbol && lastTimeframeRef.current === timeframe) {
+            console.log('🔄 Auto-refreshing chart after tab switch');
+            
+            // Disconnect and reconnect WebSocket
+            if (wsRef.current) {
+              try {
+                wsRef.current.disconnect();
+              } catch (error) {
+                console.warn('Error disconnecting WebSocket on refresh:', error);
+              }
+              wsRef.current = null;
+            }
+            
+            // Re-fetch historical data to ensure we have latest
+            const interval = TIMEFRAME_MAP[timeframe] || timeframe.toLowerCase();
+            
+            // Create new abort controller for refresh
+            if (abortControllerRef.current) {
+              abortControllerRef.current.abort();
+            }
+            abortControllerRef.current = new AbortController();
+            
+            // Re-fetch and reconnect
+            fetchBinanceHistory(symbol, interval, 500, abortControllerRef.current.signal)
+              .then(history => {
+                if (history && history.length > 0) {
+                  console.log('✅ Refreshed historical data:', history.length, 'candles');
+                  setCandles(history);
+                  
+                  // Update current price
+                  updateTradingData({ currentPrice: history[history.length - 1].close });
+                  
+                  // Reconnect WebSocket
+                  const newInterval = TIMEFRAME_MAP[timeframe] || timeframe.toLowerCase();
+                  wsRef.current = new BinanceWebSocket(
+                    symbol,
+                    newInterval,
+                    (candle: Candle) => {
+                      setCandles((prev) => {
+                        const newCandles = [...prev];
+                        const existingIndex = newCandles.findIndex((c) => c.time === candle.time);
+
+                        if (existingIndex >= 0) {
+                          newCandles[existingIndex] = candle;
+                        } else {
+                          newCandles.push(candle);
+                          if (newCandles.length > 500) {
+                            newCandles.shift();
+                          }
+                        }
+
+                        updateTradingData({ currentPrice: candle.close });
+                        return newCandles.sort((a, b) => a.time - b.time);
+                      });
+                    }
+                  );
+                  
+                  setIsLoading(false);
+                }
+              })
+              .catch(error => {
+                if (error.name !== 'AbortError') {
+                  console.error('Error refreshing chart:', error);
+                }
+              });
+          }
+        }, 1000); // Refresh within 1 second
+      }
+    };
+
+    // Add visibility change listener
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      // Cleanup
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, [symbol, timeframe, updateTradingData]);
+
+  // Update refs when symbol/timeframe change
+  useEffect(() => {
+    lastSymbolRef.current = symbol;
+    lastTimeframeRef.current = timeframe;
+  }, [symbol, timeframe]);
 
   return { candles, isLoading };
 }

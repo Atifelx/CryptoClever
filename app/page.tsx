@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import TradingChart from './components/Chart/TradingChart';
+import TradingSignalsPanel from './components/Chart/TradingSignalsPanel';
 import SymbolList from './components/Sidebar/SymbolList';
 import SearchBar from './components/Sidebar/SearchBar';
 import TimeframeSelector from './components/Header/TimeframeSelector';
@@ -30,13 +31,19 @@ export default function Home() {
     setIsMounted(true);
     
     // Load saved indicator preferences from localStorage
+    // CRITICAL: filter to only valid registry IDs to prevent stale entries
     try {
       const saved = localStorage.getItem('enabled-indicators');
       if (saved) {
         const parsed = JSON.parse(saved) as string[];
         if (Array.isArray(parsed)) {
-          const savedSet = new Set<string>(parsed);
+          const validIds = parsed.filter(id => INDICATOR_REGISTRY[id]);
+          const savedSet = new Set<string>(validIds);
           setEnabledIndicators(savedSet);
+          // Clean up stale entries in localStorage
+          if (validIds.length !== parsed.length) {
+            localStorage.setItem('enabled-indicators', JSON.stringify(validIds));
+          }
         }
       }
     } catch (e) {
@@ -101,6 +108,9 @@ export default function Home() {
             onToggleIndicator={handleToggleIndicator}
           />
         </div>
+
+        {/* Trading Signals Panel - Above Chart */}
+        <TradingSignalsPanel />
 
         {/* Chart */}
         <div className="flex-1 p-4 min-h-0">

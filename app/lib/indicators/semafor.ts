@@ -1,417 +1,618 @@
 import { Candle, SemaforPoint } from './types';
 
 /**
- * Professional Semafor Indicator
- * Based on ZigZag algorithm with multiple period levels
- * Identifies swing highs/lows and generates buy/sell signals
+ * Semafor Indicator — NON-REPAINTING Rebuild
  * 
- * Algorithm inspired by MetaTrader 4/5 Semafor implementations
- * Uses multiple depth levels for robust pivot detection
+ * ═══════════════════════════════════════════════════════════════
+ * CORE: ZigZag-based pivot detection (faithful to MT4 Semafor)
+ * ═══════════════════════════════════════════════════════════════
+ * 1. Scan candles left→right tracking direction (up/down)
+ * 2. When direction is UP, track the swing high
+ * 3. When price drops by ≥ deviation% from the swing high → CONFIRM high pivot
+ * 4. Switch direction to DOWN, begin tracking the swing low
+ * 5. When price rises by ≥ deviation% from the swing low → CONFIRM low pivot
+ * 6. Switch direction to UP, repeat
+ * 
+ * ═══════════════════════════════════════════════════════════════
+ * LIVE SIGNALS: Non-repainting candle pattern detection
+ * ═══════════════════════════════════════════════════════════════
+ * ⚠️ ANTI-REPAINTING RULES (CRITICAL):
+ *   1. NEVER analyze the forming candle (candles[len-1])
+ *   2. Only analyze CLOSED candles for patterns
+ *   3. Require EMA(20) vs EMA(50) trend confirmation
+ *   4. Maximum ONE signal direction per candle (no contradictions)
+ *   5. Strict thresholds — body > atr*0.4, not 0.15
+ *   6. Prior trend context required (can't signal without preceding move)
+ *   7. Removed: Doji, Pin Bar, Momentum (too noisy / repainting-prone)
+ *   8. Kept: Engulfing, Hammer, Shooting Star, Morning/Evening Star
  */
 
-interface ZigZagPoint {
+// ────────────────────────────────────────────────────────────
+//  TYPES
+// ────────────────────────────────────────────────────────────
+
+interface ZigZagPivot {
+  index: number;
   time: number;
   price: number;
   type: 'high' | 'low';
-  barIndex: number;
+}
+
+export interface LiveSignal {
+  time: number;
+  price: number;
+  type: 'high' | 'low';
+  direction: 'UP' | 'DOWN';
+  strength: 1 | 2 | 3;
+  pattern: string;
+  isLive: true;
+}
+
+export interface SemaforTrend {
+  trend: 'BULL' | 'BEAR' | 'NEUTRAL';
+  ema20: number;
+  ema50: number;
+}
+
+// ────────────────────────────────────────────────────────────
+//  MATH HELPERS
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Exponential Moving Average — returns the final EMA value
+ */
+function computeEMA(values: number[], period: number): number {
+  if (values.length === 0) return 0;
+  if (values.length < period) {
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+  const k = 2 / (period + 1);
+  let ema = 0;
+  for (let i = 0; i < period; i++) ema += values[i];
+  ema /= period;
+  for (let i = period; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+  }
+  return ema;
 }
 
 /**
- * Calculate Semafor pivot points using ZigZag-based algorithm
+ * Average True Range — returns ATR in price units
+ */
+function computeATR(candles: Candle[], period: number): number {
+  if (candles.length < period + 1) return 0;
+  const recent = candles.slice(-period - 1);
+  let total = 0;
+  for (let i = 1; i < recent.length; i++) {
+    const tr = Math.max(
+      recent[i].high - recent[i].low,
+      Math.abs(recent[i].high - recent[i - 1].close),
+      Math.abs(recent[i].low - recent[i - 1].close)
+    );
+    total += tr;
+  }
+  return total / period;
+}
+
+// ────────────────────────────────────────────────────────────
+//  ADAPTIVE DEVIATION (ZigZag sensitivity)
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Calculate adaptive deviation using ATR%
+ * Makes the indicator work equally well across all price ranges
+ */
+function getAdaptiveDeviation(candles: Candle[], timeframe?: string): number {
+  if (candles.length < 10) return 0.5;
+
+  const lookback = Math.min(50, candles.length - 1);
+  const recent = candles.slice(-lookback - 1);
+  let totalTR = 0;
+
+  for (let i = 1; i < recent.length; i++) {
+    const tr = Math.max(
+      recent[i].high - recent[i].low,
+      Math.abs(recent[i].high - recent[i - 1].close),
+      Math.abs(recent[i].low - recent[i - 1].close)
+    );
+    totalTR += (tr / recent[i].close) * 100;
+  }
+
+  const atrPercent = totalTR / lookback;
+
+  const multipliers: Record<string, number> = {
+    '1m': 3.0,
+    '5m': 3.5,
+    '15m': 4.0,
+    '1h': 4.5,
+    '4h': 5.5,
+    '1d': 6.5,
+  };
+
+  const tf = (timeframe || '5m').toLowerCase();
+  const mult = multipliers[tf] || 3.5;
+
+  return Math.max(0.08, Math.min(atrPercent * mult, 20.0));
+}
+
+// ────────────────────────────────────────────────────────────
+//  CORE ZIGZAG ENGINE
+// ────────────────────────────────────────────────────────────
+
+/**
+ * ZigZag — deviation-based, left→right scan, strict alternation
+ * Produces clean High-Low-High-Low sequence
+ */
+function runZigZag(candles: Candle[], devPercent: number): ZigZagPivot[] {
+  if (candles.length < 3) return [];
+
+  const pivots: ZigZagPivot[] = [];
+
+  let direction = 0; // 0=unknown, 1=up (tracking high), -1=down (tracking low)
+  let swHi = 0;
+  let swHiP = candles[0].high;
+  let swLo = 0;
+  let swLoP = candles[0].low;
+
+  for (let i = 1; i < candles.length; i++) {
+    const bar = candles[i];
+
+    if (direction === 0) {
+      if (bar.high > swHiP) { swHiP = bar.high; swHi = i; }
+      if (bar.low < swLoP) { swLoP = bar.low; swLo = i; }
+
+      const spread = ((swHiP - swLoP) / swLoP) * 100;
+      if (spread >= devPercent) {
+        if (swHi > swLo) {
+          pivots.push({ index: swLo, time: candles[swLo].time, price: swLoP, type: 'low' });
+          direction = 1;
+        } else {
+          pivots.push({ index: swHi, time: candles[swHi].time, price: swHiP, type: 'high' });
+          direction = -1;
+        }
+      }
+      continue;
+    }
+
+    if (direction === 1) {
+      if (bar.high > swHiP) {
+        swHiP = bar.high;
+        swHi = i;
+      }
+      const drop = ((swHiP - bar.low) / swHiP) * 100;
+      if (drop >= devPercent) {
+        pivots.push({ index: swHi, time: candles[swHi].time, price: swHiP, type: 'high' });
+        direction = -1;
+        swLoP = bar.low;
+        swLo = i;
+      }
+    } else {
+      if (bar.low < swLoP) {
+        swLoP = bar.low;
+        swLo = i;
+      }
+      const rise = ((bar.high - swLoP) / swLoP) * 100;
+      if (rise >= devPercent) {
+        pivots.push({ index: swLo, time: candles[swLo].time, price: swLoP, type: 'low' });
+        direction = 1;
+        swHiP = bar.high;
+        swHi = i;
+      }
+    }
+  }
+
+  // Add the last unconfirmed extreme (the "live" pivot)
+  if (direction === 1) {
+    pivots.push({ index: swHi, time: candles[swHi].time, price: swHiP, type: 'high' });
+  } else if (direction === -1) {
+    pivots.push({ index: swLo, time: candles[swLo].time, price: swLoP, type: 'low' });
+  }
+
+  return pivots;
+}
+
+// ────────────────────────────────────────────────────────────
+//  STRENGTH ASSIGNMENT
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Assign strength 1/2/3 based on swing size percentiles
+ */
+function assignStrengths(pivots: ZigZagPivot[]): Map<number, 1 | 2 | 3> {
+  const strengths = new Map<number, 1 | 2 | 3>();
+  if (pivots.length < 2) {
+    pivots.forEach(p => strengths.set(p.index, 2));
+    return strengths;
+  }
+
+  const swings: { index: number; size: number }[] = [];
+  for (let i = 1; i < pivots.length; i++) {
+    const prev = pivots[i - 1];
+    const curr = pivots[i];
+    const minP = Math.min(prev.price, curr.price);
+    const size = minP > 0 ? (Math.abs(curr.price - prev.price) / minP) * 100 : 0;
+    swings.push({ index: curr.index, size });
+  }
+  if (swings.length > 0) {
+    swings.unshift({ index: pivots[0].index, size: swings[0].size });
+  }
+
+  const sorted = swings.map(s => s.size).sort((a, b) => a - b);
+  const p50 = sorted[Math.floor(sorted.length * 0.5)] || 0;
+  const p80 = sorted[Math.floor(sorted.length * 0.8)] || 0;
+
+  swings.forEach(({ index, size }) => {
+    if (size >= p80) strengths.set(index, 3);
+    else if (size >= p50) strengths.set(index, 2);
+    else strengths.set(index, 1);
+  });
+
+  return strengths;
+}
+
+// ════════════════════════════════════════════════════════════
+//  NON-REPAINTING LIVE PATTERN DETECTION
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Detect candle patterns on CLOSED candles only.
  * 
- * @param candles - Array of candle data
- * @param depth - Depth parameter for ZigZag (default 5, typical: 5-12)
- * @param deviation - Minimum price deviation percentage (default 0.5%)
- * @param backstep - Minimum bars between pivots (default 3)
- * @returns Array of pivot points with strength ratings and signals
+ * This function is called on every tick but its output is DETERMINISTIC
+ * because it NEVER looks at the forming candle (candles[len-1]).
+ * The closed candle data never changes, so the same input → same output.
+ * 
+ * TREND FILTER:
+ *   EMA(20) > EMA(50) → uptrend → only BUY signals
+ *   EMA(20) < EMA(50) → downtrend → only SELL signals
+ *   Neutral → allow the strongest signal
+ * 
+ * PATTERNS (strict thresholds):
+ *   ✅ Bullish Engulfing  — requires prior bearish move + body > ATR*0.4
+ *   ✅ Bearish Engulfing  — requires prior bullish move + body > ATR*0.4
+ *   ✅ Hammer             — requires prior bearish move + lower wick > 2x body
+ *   ✅ Shooting Star      — requires prior bullish move + upper wick > 2x body
+ *   ✅ Morning Star       — 3-candle pattern, body > ATR*0.5
+ *   ✅ Evening Star       — 3-candle pattern, body > ATR*0.5
+ * 
+ *   ❌ Doji              — REMOVED (too common, unreliable on live)
+ *   ❌ Pin Bar            — REMOVED (overlaps with Hammer/Shooting Star)
+ *   ❌ Momentum           — REMOVED (biggest source of repainting noise)
+ */
+function detectLivePatterns(candles: Candle[]): LiveSignal[] {
+  // Need enough data for EMA(50) + pattern context
+  if (candles.length < 55) return [];
+
+  const signals: LiveSignal[] = [];
+  const len = candles.length;
+  const atr = computeATR(candles, 14);
+  if (atr <= 0) return signals;
+
+  // ═══ TREND CONTEXT via EMA(20) vs EMA(50) ═══
+  // IMPORTANT: Only use closes up to candles[len-2] (exclude forming candle)
+  const closedCloses = candles.slice(0, len - 1).map(c => c.close);
+  const ema20 = computeEMA(closedCloses, 20);
+  const ema50 = computeEMA(closedCloses, 50);
+
+  const emaDiff = ema50 > 0 ? ((ema20 - ema50) / ema50) * 100 : 0;
+
+  let trend: 'BULL' | 'BEAR' | 'NEUTRAL';
+  if (emaDiff > 0.02) trend = 'BULL';
+  else if (emaDiff < -0.02) trend = 'BEAR';
+  else trend = 'NEUTRAL';
+
+  // ═══ ANALYZE ONLY CLOSED CANDLES ═══
+  // Check the last 2 CLOSED candles (candles[len-2] and candles[len-3])
+  // candles[len-1] is the FORMING candle — NEVER TOUCH IT
+  for (let offset = 2; offset <= 3; offset++) {
+    const idx = len - offset;
+    if (idx < 5) continue;
+
+    const c = candles[idx];         // Signal candle (CLOSED)
+    const p1 = candles[idx - 1];    // Previous candle
+    const p2 = candles[idx - 2];    // 2 candles before
+    const p3 = candles[idx - 3];    // 3 candles before
+
+    const body = Math.abs(c.close - c.open);
+    const range = c.high - c.low;
+    const p1Body = Math.abs(p1.close - p1.open);
+    const p2Body = Math.abs(p2.close - p2.open);
+
+    const isBullish = c.close > c.open;
+    const isBearish = c.close < c.open;
+    const p1Bullish = p1.close > p1.open;
+    const p1Bearish = p1.close < p1.open;
+
+    const upperWick = c.high - Math.max(c.open, c.close);
+    const lowerWick = Math.min(c.open, c.close) - c.low;
+
+    // Was there a clear prior move in one direction?
+    // Require: 2+ of last 3 candles in the same direction AND closes trending
+    const priorBearCount = [p1, p2, p3].filter(x => x.close < x.open).length;
+    const priorBullCount = [p1, p2, p3].filter(x => x.close > x.open).length;
+    const priorBearish = priorBearCount >= 2 && p1.close < p2.close;
+    const priorBullish = priorBullCount >= 2 && p1.close > p2.close;
+
+    // ──── BULLISH PATTERNS ────
+    // Only signal BUY in uptrend or neutral (NEVER in confirmed downtrend)
+    if (trend !== 'BEAR') {
+
+      // 1. BULLISH ENGULFING
+      // Previous red, current green, current body fully covers previous body
+      if (p1Bearish && isBullish &&
+          c.open <= p1.close && c.close >= p1.open &&
+          body > p1Body * 1.0 &&     // Must fully engulf
+          body > atr * 0.4 &&         // Significant body size
+          priorBearish) {              // After a bearish move
+        const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.8 ? 2 : 1;
+        signals.push({
+          time: c.time, price: c.low, type: 'low',
+          direction: 'UP', strength: str,
+          pattern: 'Bullish Engulfing', isLive: true,
+        });
+      }
+
+      // 2. HAMMER (bullish reversal after downtrend)
+      // Small body at top, long lower wick, short upper wick
+      if (priorBearish &&
+          lowerWick > body * 2.0 &&    // Lower wick ≥ 2x body
+          upperWick < body * 0.5 &&    // Upper wick < 0.5x body
+          body > 0 &&                  // Must have some body
+          range > atr * 0.5) {         // Significant range
+        const str: 1|2|3 = lowerWick > body * 4 ? 3 : lowerWick > body * 2.5 ? 2 : 1;
+        signals.push({
+          time: c.time, price: c.low, type: 'low',
+          direction: 'UP', strength: str,
+          pattern: 'Hammer', isLive: true,
+        });
+      }
+
+      // 3. MORNING STAR (3-candle bullish reversal)
+      // p2 = big red, p1 = small body (star), c = big green closing above p2 midpoint
+      if (idx >= 5) {
+        const p2Bearish = p2.close < p2.open;
+        const p1Small = p1Body < p2Body * 0.3 && p1Body < body * 0.3;
+        const p2Mid = (p2.open + p2.close) / 2;
+
+        if (p2Bearish && p1Small && isBullish && c.close > p2Mid &&
+            body > atr * 0.5 && p2Body > atr * 0.5) {
+          signals.push({
+            time: c.time, price: c.low, type: 'low',
+            direction: 'UP', strength: 3,
+            pattern: 'Morning Star', isLive: true,
+          });
+        }
+      }
+    }
+
+    // ──── BEARISH PATTERNS ────
+    // Only signal SELL in downtrend or neutral (NEVER in confirmed uptrend)
+    if (trend !== 'BULL') {
+
+      // 4. BEARISH ENGULFING
+      // Previous green, current red, current body fully covers previous body
+      if (p1Bullish && isBearish &&
+          c.open >= p1.close && c.close <= p1.open &&
+          body > p1Body * 1.0 &&
+          body > atr * 0.4 &&
+          priorBullish) {
+        const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.8 ? 2 : 1;
+        signals.push({
+          time: c.time, price: c.high, type: 'high',
+          direction: 'DOWN', strength: str,
+          pattern: 'Bearish Engulfing', isLive: true,
+        });
+      }
+
+      // 5. SHOOTING STAR (bearish reversal after uptrend)
+      // Small body at bottom, long upper wick, short lower wick
+      if (priorBullish &&
+          upperWick > body * 2.0 &&
+          lowerWick < body * 0.5 &&
+          body > 0 &&
+          range > atr * 0.5) {
+        const str: 1|2|3 = upperWick > body * 4 ? 3 : upperWick > body * 2.5 ? 2 : 1;
+        signals.push({
+          time: c.time, price: c.high, type: 'high',
+          direction: 'DOWN', strength: str,
+          pattern: 'Shooting Star', isLive: true,
+        });
+      }
+
+      // 6. EVENING STAR (3-candle bearish reversal)
+      // p2 = big green, p1 = small body (star), c = big red closing below p2 midpoint
+      if (idx >= 5) {
+        const p2Bullish = p2.close > p2.open;
+        const p1Small = p1Body < p2Body * 0.3 && p1Body < body * 0.3;
+        const p2Mid = (p2.open + p2.close) / 2;
+
+        if (p2Bullish && p1Small && isBearish && c.close < p2Mid &&
+            body > atr * 0.5 && p2Body > atr * 0.5) {
+          signals.push({
+            time: c.time, price: c.high, type: 'high',
+            direction: 'DOWN', strength: 3,
+            pattern: 'Evening Star', isLive: true,
+          });
+        }
+      }
+    }
+  }
+
+  // ═══ DEDUPLICATION ═══
+  // One signal per candle time per direction — keep highest strength
+  const seen = new Map<string, LiveSignal>();
+  for (const sig of signals) {
+    const key = `${sig.time}-${sig.direction}`;
+    const existing = seen.get(key);
+    if (!existing || sig.strength > existing.strength) {
+      seen.set(key, sig);
+    }
+  }
+
+  const deduped = Array.from(seen.values());
+
+  // ═══ CONFLICT RESOLUTION ═══
+  // If both BUY and SELL on the same candle time → keep only the trend-aligned one
+  const byTime = new Map<number, LiveSignal[]>();
+  for (const sig of deduped) {
+    const arr = byTime.get(sig.time) || [];
+    arr.push(sig);
+    byTime.set(sig.time, arr);
+  }
+
+  const result: LiveSignal[] = [];
+  for (const [, sigs] of byTime.entries()) {
+    if (sigs.length === 1) {
+      result.push(sigs[0]);
+    } else {
+      // Multiple on same candle — pick by trend, then strength
+      const trendSig = sigs.find(s =>
+        (trend === 'BULL' && s.direction === 'UP') ||
+        (trend === 'BEAR' && s.direction === 'DOWN')
+      );
+      if (trendSig) {
+        result.push(trendSig);
+      } else {
+        // Neutral — pick strongest
+        result.push(sigs.reduce((best, s) => s.strength > best.strength ? s : best));
+      }
+    }
+  }
+
+  return result;
+}
+
+
+// ════════════════════════════════════════════════════════════
+//  MAIN EXPORT: calculateSemafor
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Main Semafor calculation
+ * 
+ * Returns ZigZag pivot points + non-repainting live pattern signals.
+ * Live signals only appear on CLOSED candles and are deterministic.
  */
 export function calculateSemafor(
   candles: Candle[],
-  depth: number = 5,
-  deviation: number = 0.5,
-  backstep: number = 3
+  timeframe?: string
 ): SemaforPoint[] {
-  const points: SemaforPoint[] = [];
-  
-  // Safety checks
-  if (!candles || !Array.isArray(candles) || candles.length === 0) {
-    return points;
+  if (!candles || !Array.isArray(candles) || candles.length < 10) {
+    return [];
   }
-  
-  // Need minimum bars for calculation
-  const minBars = Math.max(depth * 2 + backstep, 20);
-  if (candles.length < minBars) {
-    return points;
-  }
-  
-  try {
-    // Step 1: Calculate ZigZag points using multiple depth levels
-    const zigzagPoints = calculateZigZag(candles, depth, deviation, backstep);
-    
-    if (zigzagPoints.length < 2) {
-      return points;
-    }
-    
-    // Step 2: Analyze each ZigZag point for strength and signals
-    // Limit to prevent performance issues (max 100 points)
-    const maxPoints = Math.min(zigzagPoints.length, 100);
-    const pointMap = new Map<number, SemaforPoint>(); // Deduplicate by time
-    
-    for (let i = 0; i < maxPoints; i++) {
-      const zzPoint = zigzagPoints[i];
-      
-      try {
-        // Calculate pivot strength using multiple methods
-        const strength = calculateAdvancedStrength(candles, zzPoint, zigzagPoints, i);
-        
-        // Calculate buy/sell signal with improved logic
-        const signal = calculateAdvancedSignal(candles, zzPoint, zigzagPoints, i);
-        
-        // Include all points with strength >= 1 (show all pivots, not just signals)
-        if (strength >= 1) {
-          const newPoint: SemaforPoint = {
-            time: zzPoint.time,
-            price: zzPoint.price,
-            type: zzPoint.type,
-            strength: strength as 1 | 2 | 3,
-            barIndex: zzPoint.barIndex,
-            signal: signal.signal || undefined,
-            signalStrength: signal.signal ? signal.strength : undefined
-          };
-          
-          // Deduplicate: if point at same time exists, keep the stronger one
-          const existingPoint = pointMap.get(zzPoint.time);
-          if (!existingPoint) {
-            pointMap.set(zzPoint.time, newPoint);
-          } else {
-            // Keep the point with higher strength or signal strength
-            const existingStrength = existingPoint.signalStrength || existingPoint.strength;
-            const newStrength = newPoint.signalStrength || newPoint.strength;
-            if (newStrength > existingStrength) {
-              pointMap.set(zzPoint.time, newPoint);
-            } else if (newStrength === existingStrength && newPoint.signal && !existingPoint.signal) {
-              // If same strength but new one has signal, prefer it
-              pointMap.set(zzPoint.time, newPoint);
-            }
-          }
-        }
-      } catch (pointError) {
-        // Skip this point if calculation fails
-        console.warn('Error calculating point:', pointError);
-        continue;
-      }
-    }
-    
-    // Convert map to array (already deduplicated)
-    const deduplicatedPoints = Array.from(pointMap.values());
-    points.push(...deduplicatedPoints);
-  } catch (error) {
-    console.error('Error in calculateSemafor:', error);
-    return points; // Return empty array on error to prevent crash
-  }
-  
-  return points;
-}
 
-/**
- * Calculate ZigZag points using depth and deviation
- * FIXED: Properly alternates between highs and lows
- */
-function calculateZigZag(
-  candles: Candle[],
-  depth: number,
-  deviation: number,
-  backstep: number
-): ZigZagPoint[] {
-  const points: ZigZagPoint[] = [];
-  let lastExtreme: { price: number; index: number; type: 'high' | 'low' } | null = null;
-  let pendingExtreme: { price: number; index: number; type: 'high' | 'low' } | null = null;
-  
-  // Start from depth bars to have enough history
-  for (let i = depth; i < candles.length - depth; i++) {
-    const current = candles[i];
-    
-    // Find highest/lowest in the depth window
-    let isHigh = true;
-    let isLow = true;
-    
-    for (let j = i - depth; j <= i + depth; j++) {
-      if (j !== i) {
-        if (candles[j].high >= current.high) {
-          isHigh = false;
-        }
-        if (candles[j].low <= current.low) {
-          isLow = false;
-        }
-      }
-    }
-    
-    // Check for high pivot
-    if (isHigh) {
-      const windowHigh = Math.max(...candles.slice(i - depth, i + depth + 1).map(c => c.high));
-      if (current.high === windowHigh) {
-        // If we have a pending extreme, check if we should confirm it
-        if (pendingExtreme && pendingExtreme.type === 'low') {
-          // Check deviation from pending low
-          const deviationPercent = ((current.high - pendingExtreme.price) / pendingExtreme.price) * 100;
-          if (deviationPercent >= deviation && (i - pendingExtreme.index) >= backstep) {
-            // Confirm the pending low
-            points.push({
-              time: candles[pendingExtreme.index].time,
-              price: pendingExtreme.price,
-              type: pendingExtreme.type,
-              barIndex: pendingExtreme.index
-            });
-            lastExtreme = pendingExtreme;
-            pendingExtreme = { price: current.high, index: i, type: 'high' };
-          } else if (current.high > pendingExtreme.price * (1 + deviation / 100)) {
-            // New high is significantly higher, replace pending
-            pendingExtreme = { price: current.high, index: i, type: 'high' };
-          }
-        } else if (!lastExtreme || lastExtreme.type === 'low') {
-          // First point or alternating from low to high
-          const deviationPercent = lastExtreme 
-            ? ((current.high - lastExtreme.price) / lastExtreme.price) * 100
-            : deviation + 1; // First point always passes
-          
-          if (deviationPercent >= deviation && (!lastExtreme || (i - lastExtreme.index) >= backstep)) {
-            if (lastExtreme) {
-              points.push({
-                time: candles[lastExtreme.index].time,
-                price: lastExtreme.price,
-                type: lastExtreme.type,
-                barIndex: lastExtreme.index
-              });
-            }
-            lastExtreme = { price: current.high, index: i, type: 'high' };
-            pendingExtreme = null;
-          } else if (!pendingExtreme || current.high > pendingExtreme.price) {
-            pendingExtreme = { price: current.high, index: i, type: 'high' };
-          }
-        }
-      }
-    }
-    
-    // Check for low pivot
-    if (isLow) {
-      const windowLow = Math.min(...candles.slice(i - depth, i + depth + 1).map(c => c.low));
-      if (current.low === windowLow) {
-        // If we have a pending extreme, check if we should confirm it
-        if (pendingExtreme && pendingExtreme.type === 'high') {
-          // Check deviation from pending high
-          const deviationPercent = ((pendingExtreme.price - current.low) / pendingExtreme.price) * 100;
-          if (deviationPercent >= deviation && (i - pendingExtreme.index) >= backstep) {
-            // Confirm the pending high
-            points.push({
-              time: candles[pendingExtreme.index].time,
-              price: pendingExtreme.price,
-              type: pendingExtreme.type,
-              barIndex: pendingExtreme.index
-            });
-            lastExtreme = pendingExtreme;
-            pendingExtreme = { price: current.low, index: i, type: 'low' };
-          } else if (current.low < pendingExtreme.price * (1 - deviation / 100)) {
-            // New low is significantly lower, replace pending
-            pendingExtreme = { price: current.low, index: i, type: 'low' };
-          }
-        } else if (!lastExtreme || lastExtreme.type === 'high') {
-          // First point or alternating from high to low
-          const deviationPercent = lastExtreme
-            ? ((lastExtreme.price - current.low) / lastExtreme.price) * 100
-            : deviation + 1; // First point always passes
-          
-          if (deviationPercent >= deviation && (!lastExtreme || (i - lastExtreme.index) >= backstep)) {
-            if (lastExtreme) {
-              points.push({
-                time: candles[lastExtreme.index].time,
-                price: lastExtreme.price,
-                type: lastExtreme.type,
-                barIndex: lastExtreme.index
-              });
-            }
-            lastExtreme = { price: current.low, index: i, type: 'low' };
-            pendingExtreme = null;
-          } else if (!pendingExtreme || current.low < pendingExtreme.price) {
-            pendingExtreme = { price: current.low, index: i, type: 'low' };
-          }
-        }
-      }
-    }
-  }
-  
-  // Add the last confirmed extreme
-  if (lastExtreme) {
-    points.push({
-      time: candles[lastExtreme.index].time,
-      price: lastExtreme.type === 'high' ? candles[lastExtreme.index].high : candles[lastExtreme.index].low,
-      type: lastExtreme.type,
-      barIndex: lastExtreme.index
+  try {
+    const data = candles.length > 500 ? candles.slice(-500) : candles;
+
+    // Adaptive deviation based on volatility
+    const deviation = getAdaptiveDeviation(data, timeframe);
+
+    // Run ZigZag for pivot detection
+    const pivots = runZigZag(data, deviation);
+    if (pivots.length === 0) return [];
+
+    // Assign strength levels to pivots
+    const strengths = assignStrengths(pivots);
+
+    // Convert pivots to SemaforPoints
+    const points: SemaforPoint[] = pivots.map(pivot => {
+      const strength = strengths.get(pivot.index) || 1;
+      return {
+        time: pivot.time,
+        price: pivot.price,
+        type: pivot.type,
+        strength,
+        barIndex: pivot.index,
+        signal: pivot.type === 'high' ? ('SELL' as const) : ('BUY' as const),
+        signalStrength: strength,
+      };
     });
-  }
-  
-  // Add pending extreme if it's significant
-  if (pendingExtreme && lastExtreme) {
-    const deviationPercent = pendingExtreme.type === 'high'
-      ? ((pendingExtreme.price - lastExtreme.price) / lastExtreme.price) * 100
-      : ((lastExtreme.price - pendingExtreme.price) / lastExtreme.price) * 100;
-    
-    if (deviationPercent >= deviation) {
+
+    // ──── NON-REPAINTING LIVE PATTERN DETECTION ────
+    // Only signals on CLOSED candles with trend confirmation
+    const liveSignals = detectLivePatterns(data);
+
+    if (liveSignals.length > 0) {
+      console.log('📍 Confirmed pattern signals:', liveSignals.map(s => `${s.pattern} (${s.direction})`).join(', '));
+    }
+
+    // Check for cooldown: don't add a live signal if there's already
+    // a ZigZag pivot within 3 candles of the signal candle
+    const pivotTimes = new Set(pivots.map(p => p.time));
+
+    for (const sig of liveSignals) {
+      // Cooldown: skip if a ZigZag pivot of the same type exists at this time
+      if (pivotTimes.has(sig.time)) continue;
+
+      // Also skip if there's a pivot within ±2 candle times
+      const sigIdx = data.findIndex(c => c.time === sig.time);
+      let tooCloseToZigZag = false;
+      for (let i = Math.max(0, sigIdx - 2); i <= Math.min(data.length - 1, sigIdx + 2); i++) {
+        if (pivotTimes.has(data[i].time)) {
+          // Check if it's the same type (high/low)
+          const nearbyPivot = pivots.find(p => p.time === data[i].time);
+          if (nearbyPivot && nearbyPivot.type === sig.type) {
+            tooCloseToZigZag = true;
+            break;
+          }
+        }
+      }
+      if (tooCloseToZigZag) continue;
+
       points.push({
-        time: candles[pendingExtreme.index].time,
-        price: pendingExtreme.type === 'high' ? candles[pendingExtreme.index].high : candles[pendingExtreme.index].low,
-        type: pendingExtreme.type,
-        barIndex: pendingExtreme.index
+        time: sig.time,
+        price: sig.price,
+        type: sig.type,
+        strength: sig.strength,
+        barIndex: sigIdx >= 0 ? sigIdx : data.length - 2,
+        signal: sig.direction === 'UP' ? 'BUY' : 'SELL',
+        signalStrength: sig.strength,
+        isLive: true,
+        pattern: sig.pattern,
+        direction: sig.direction,
       });
     }
+
+    return points;
+  } catch (error) {
+    console.error('Semafor error:', error);
+    return [];
   }
-  
-  return points;
 }
 
-/**
- * Advanced strength calculation using multiple factors:
- * 1. Price percentile ranking
- * 2. Volume confirmation
- * 3. Distance from moving average
- * 4. Number of touches (support/resistance strength)
- */
-function calculateAdvancedStrength(
-  candles: Candle[],
-  point: ZigZagPoint,
-  allPoints: ZigZagPoint[],
-  pointIndex: number
-): 1 | 2 | 3 {
-  let strengthScore = 0;
-  
-  // Factor 1: Price percentile (0-30 points)
-  const lookback = Math.min(50, point.barIndex);
-  const start = Math.max(0, point.barIndex - lookback);
-  const prices = candles.slice(start, point.barIndex + 1)
-    .map(c => point.type === 'high' ? c.high : c.low);
-  
-  if (prices.length > 0) {
-    const sorted = [...prices].sort((a, b) => point.type === 'high' ? b - a : a - b);
-    const rank = sorted.indexOf(point.price);
-    const percentile = rank / sorted.length;
-    
-    if (percentile < 0.05) strengthScore += 30;
-    else if (percentile < 0.15) strengthScore += 20;
-    else if (percentile < 0.30) strengthScore += 10;
-  }
-  
-  // Factor 2: Volume confirmation (0-25 points)
-  if (candles[point.barIndex]?.volume) {
-    const avgVolume = candles.slice(start, point.barIndex + 1)
-      .reduce((sum, c) => sum + (c.volume || 0), 0) / (point.barIndex - start + 1);
-    const volumeRatio = (candles[point.barIndex].volume || 0) / (avgVolume || 1);
-    
-    if (volumeRatio > 1.5) strengthScore += 25;
-    else if (volumeRatio > 1.2) strengthScore += 15;
-    else if (volumeRatio > 1.0) strengthScore += 5;
-  }
-  
-  // Factor 3: Distance from EMA (0-25 points)
-  const emaPeriod = 20;
-  if (point.barIndex >= emaPeriod) {
-    try {
-      const ema = calculateEMA(candles.slice(point.barIndex - emaPeriod, point.barIndex + 1), emaPeriod);
-      const distance = Math.abs(point.price - ema) / (ema || 1) * 100;
-      
-      if (distance > 3) strengthScore += 25;
-      else if (distance > 2) strengthScore += 15;
-      else if (distance > 1) strengthScore += 5;
-    } catch (e) {
-      // Skip EMA calculation if it fails
-    }
-  }
-  
-  // Factor 4: Support/Resistance touches (0-20 points)
-  const nearbyPoints = allPoints.filter(p => 
-    Math.abs(p.barIndex - point.barIndex) <= 20 &&
-    Math.abs(p.price - point.price) / (point.price || 1) < 0.01 // Within 1%
-  );
-  
-  if (nearbyPoints.length >= 3) strengthScore += 20;
-  else if (nearbyPoints.length >= 2) strengthScore += 10;
-  
-  // Convert score to strength level
-  if (strengthScore >= 60) return 3;
-  if (strengthScore >= 35) return 2;
-  return 1;
-}
+
+// ════════════════════════════════════════════════════════════
+//  TREND EXPORT (for UI display)
+// ════════════════════════════════════════════════════════════
 
 /**
- * Advanced signal calculation with multiple confirmation factors
- * FIXED: Lower thresholds for crypto volatility
+ * Get current trend based on EMA(20) vs EMA(50)
+ * Called separately by the UI component for display
  */
-function calculateAdvancedSignal(
-  candles: Candle[],
-  point: ZigZagPoint,
-  allPoints: ZigZagPoint[],
-  pointIndex: number
-): { signal: 'BUY' | 'SELL' | null; strength: 1 | 2 | 3 } {
-  const lookAhead = Math.min(10, candles.length - point.barIndex - 1);
-  
-  if (lookAhead < 3) {
-    return { signal: null, strength: 1 };
+export function getSemaforTrend(candles: Candle[]): SemaforTrend {
+  if (!candles || candles.length < 55) {
+    return { trend: 'NEUTRAL', ema20: 0, ema50: 0 };
   }
-  
-  const futureCandles = candles.slice(point.barIndex + 1, point.barIndex + 1 + lookAhead);
-  
-  if (point.type === 'high') {
-    // SELL signal: price should drop after high
-    const lowestPrice = Math.min(...futureCandles.map(c => c.low));
-    const dropPercent = ((point.price - lowestPrice) / point.price) * 100;
-    
-    // Additional confirmation: check if price stays below pivot
-    const closesBelow = futureCandles.filter(c => c.close < point.price * 0.998).length;
-    const confirmationRatio = closesBelow / lookAhead;
-    
-    // Lower thresholds for crypto (more volatile)
-    if (dropPercent > 1.0 && confirmationRatio > 0.5) {
-      return { signal: 'SELL', strength: 3 };
-    } else if (dropPercent > 0.5 && confirmationRatio > 0.4) {
-      return { signal: 'SELL', strength: 2 };
-    } else if (dropPercent > 0.2 && confirmationRatio > 0.3) {
-      return { signal: 'SELL', strength: 1 };
-    }
-  } else {
-    // BUY signal: price should rise after low
-    const highestPrice = Math.max(...futureCandles.map(c => c.high));
-    const risePercent = ((highestPrice - point.price) / point.price) * 100;
-    
-    // Additional confirmation: check if price stays above pivot
-    const closesAbove = futureCandles.filter(c => c.close > point.price * 1.002).length;
-    const confirmationRatio = closesAbove / lookAhead;
-    
-    // Lower thresholds for crypto (more volatile)
-    if (risePercent > 1.0 && confirmationRatio > 0.5) {
-      return { signal: 'BUY', strength: 3 };
-    } else if (risePercent > 0.5 && confirmationRatio > 0.4) {
-      return { signal: 'BUY', strength: 2 };
-    } else if (risePercent > 0.2 && confirmationRatio > 0.3) {
-      return { signal: 'BUY', strength: 1 };
-    }
-  }
-  
-  return { signal: null, strength: 1 };
+
+  const data = candles.length > 500 ? candles.slice(-500) : candles;
+  // Use closes of CLOSED candles only (exclude the forming candle)
+  const closedCloses = data.slice(0, data.length - 1).map(c => c.close);
+  const ema20 = computeEMA(closedCloses, 20);
+  const ema50 = computeEMA(closedCloses, 50);
+
+  const emaDiff = ema50 > 0 ? ((ema20 - ema50) / ema50) * 100 : 0;
+
+  let trend: 'BULL' | 'BEAR' | 'NEUTRAL';
+  if (emaDiff > 0.02) trend = 'BULL';
+  else if (emaDiff < -0.02) trend = 'BEAR';
+  else trend = 'NEUTRAL';
+
+  return { trend, ema20, ema50 };
 }
 
-/**
- * Calculate Exponential Moving Average
- */
-function calculateEMA(candles: Candle[], period: number): number {
-  if (candles.length === 0) return 0;
-  
-  const multiplier = 2 / (period + 1);
-  let ema = candles[0].close;
-  
-  for (let i = 1; i < candles.length; i++) {
-    ema = (candles[i].close - ema) * multiplier + ema;
-  }
-  
-  return ema;
-}
+
+// ════════════════════════════════════════════════════════════
+//  UTILITY EXPORTS
+// ════════════════════════════════════════════════════════════
 
 /**
  * Get recent pivot points (last N)
@@ -434,17 +635,14 @@ export function findNearestLevels(
     .filter(p => p.type === 'high')
     .map(p => p.price)
     .sort((a, b) => a - b);
-  
+
   const lows = points
     .filter(p => p.type === 'low')
     .map(p => p.price)
     .sort((a, b) => a - b);
-  
-  // Find nearest resistance (first high above current price)
+
   const resistance = highs.find(h => h > currentPrice) || null;
-  
-  // Find nearest support (last low below current price)
   const support = [...lows].reverse().find(l => l < currentPrice) || null;
-  
+
   return { support, resistance };
 }

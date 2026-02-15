@@ -4,9 +4,11 @@ import { useEffect, useRef } from 'react';
 
 /**
  * Client-side component to clear old caches and prevent caching issues
+ * Also detects 404 errors and forces reload
  */
 export default function CacheBuster() {
   const hasRun = useRef(false);
+  const reloadAttempted = useRef(false);
 
   useEffect(() => {
     // Only run once
@@ -30,12 +32,32 @@ export default function CacheBuster() {
           const registrations = await navigator.serviceWorker.getRegistrations();
           await Promise.all(registrations.map(reg => reg.unregister()));
         }
+        
+        // Clear localStorage cache markers
+        try {
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.startsWith('next-') || key.includes('cache')) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch (e) {
+          // Ignore
+        }
       } catch (e) {
         // Silently fail
       }
     };
 
     clearAllCaches();
+
+    // Add cache-busting query param to force fresh load
+    if (!window.location.search.includes('nocache')) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('nocache', Date.now().toString());
+      // Don't reload automatically, just update URL
+      window.history.replaceState({}, '', url.toString());
+    }
   }, []);
 
   return null;

@@ -44,43 +44,94 @@ export default function RootLayout({
                   }).catch(function() {});
                 }
                 
-                // Intercept script/link tag errors - but don't reload (causes infinite loop)
-                // Just log the error for debugging
-                var handleError = function(e) {
-                  var target = e.target;
-                  var src = target.src || target.href || '';
-                  if (src && src.includes('/_next/static/')) {
-                    // Don't reload - just log
-                    console.warn('Static asset failed to load:', src);
-                  }
-                };
-                
-                // Only listen for errors, don't reload
-                if (document.addEventListener) {
-                  document.addEventListener('error', handleError, true);
+                // Clear browser cache for static assets
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                    return Promise.all(registrations.map(function(reg) {
+                      return reg.unregister();
+                    }));
+                  }).catch(function() {});
                 }
                 
-                // Watch for new script/link tags (only if DOM is ready)
-                if (document.head && document.body) {
-                  try {
-                    var observer = new MutationObserver(function(mutations) {
-                      mutations.forEach(function(mutation) {
-                        mutation.addedNodes.forEach(function(node) {
-                          if (node && node.nodeType === 1) {
-                            if (node.tagName === 'SCRIPT' || node.tagName === 'LINK') {
-                              node.addEventListener('error', handleError);
-                            }
-                          }
-                        });
-                      });
+                // Clear all caches
+                if ('caches' in window) {
+                  caches.keys().then(function(names) {
+                    return Promise.all(names.map(function(name) {
+                      return caches.delete(name);
+                    }));
+                  }).catch(function() {});
+                }
+                
+                // Remove cache-busting query params and reload if needed
+                if (window.location.search.includes('v=') || window.location.search.includes('nocache')) {
+                  var newUrl = window.location.pathname;
+                  if (window.location.hash) {
+                    newUrl += window.location.hash;
+                  }
+                  window.history.replaceState({}, '', newUrl);
+                }
+                
+                // PERMANENT FIX: Intercept and retry failed chunk requests
+                (function() {
+                  var originalFetch = window.fetch;
+                  window.fetch = function() {
+                    var args = Array.prototype.slice.call(arguments);
+                    var self = this;
+                    return originalFetch.apply(self, args).catch(function(error) {
+                      // If it's a chunk loading error, retry once after clearing cache
+                      var url = args[0];
+                      if (typeof url === 'string' && url.includes('/_next/static/')) {
+                        console.warn('Chunk load failed, retrying after cache clear:', url);
+                        // Clear cache and retry
+                        if ('caches' in window) {
+                          return caches.keys().then(function(names) {
+                            return Promise.all(names.map(function(name) {
+                              return caches.delete(name);
+                            }));
+                          }).then(function() {
+                            return originalFetch.apply(self, args);
+                          }).catch(function() {
+                            // If retry fails, return original error
+                            return Promise.reject(error);
+                          });
+                        }
+                      }
+                      return Promise.reject(error);
                     });
-                    
-                    observer.observe(document.head, { childList: true, subtree: true });
-                    observer.observe(document.body, { childList: true, subtree: true });
-                  } catch(e) {
-                    // Silently fail if observer can't be created
+                  };
+                })();
+                
+                // PERMANENT FIX: Handle script tag errors (chunk loading failures)
+                var chunkErrorRetryCount = 0;
+                var maxRetries = 2;
+                window.addEventListener('error', function(event) {
+                  if (event.target && event.target.tagName === 'SCRIPT') {
+                    var src = event.target.src || event.target.getAttribute('src');
+                    if (src && src.includes('/_next/static/')) {
+                      console.warn('Script chunk error detected:', src);
+                      chunkErrorRetryCount++;
+                      
+                      // Clear cache immediately
+                      if ('caches' in window) {
+                        caches.keys().then(function(names) {
+                          return Promise.all(names.map(function(name) {
+                            return caches.delete(name);
+                          }));
+                        });
+                      }
+                      
+                      // Retry by reloading if we haven't exceeded max retries
+                      if (chunkErrorRetryCount <= maxRetries) {
+                        console.log('Retrying chunk load...');
+                        setTimeout(function() {
+                          window.location.reload();
+                        }, 1000);
+                      } else {
+                        console.error('Max retries exceeded. Please manually refresh.');
+                      }
+                    }
                   }
-                }
+                }, true);
               })();
             `,
           }}

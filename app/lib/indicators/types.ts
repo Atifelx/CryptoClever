@@ -20,6 +20,10 @@ export interface SemaforPoint {
   barIndex: number;
   signal?: 'BUY' | 'SELL' | null; // Buy/sell signal based on price action
   signalStrength?: 1 | 2 | 3; // Strength of buy/sell signal
+  // Live pattern detection fields
+  isLive?: boolean;             // true = real-time pattern signal (not ZigZag pivot)
+  pattern?: string;             // Pattern name e.g. "Bullish Engulfing", "Doji"
+  direction?: 'UP' | 'DOWN';   // Predicted move direction for arrow rendering
 }
 
 export interface FMCBRLevels {

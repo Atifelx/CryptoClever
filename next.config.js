@@ -53,15 +53,46 @@ const nextConfig = {
       };
     }
     
-    // Fix for dev server 500 errors
+    // PERMANENT FIX: Prevent _error.js 500 errors during HMR
     if (dev) {
       config.watchOptions = {
         poll: 1000,
         aggregateTimeout: 300,
+        ignored: ['**/node_modules', '**/.next'],
+      };
+      
+      // Better error handling for dev mode - prevent chunk errors
+      config.optimization = {
+        ...config.optimization,
+        removeAvailableModules: false,
+        removeEmptyChunks: false,
+        // Simplified chunk splitting to reduce errors
+        splitChunks: false, // Disable chunk splitting in dev to prevent errors
+      };
+      
+      // Ignore errors for missing chunks during HMR
+      config.ignoreWarnings = [
+        /Failed to parse source map/,
+        /Module not found/,
+      ];
+      
+      // Better HMR configuration
+      config.devServer = {
+        ...config.devServer,
+        hot: true,
+        liveReload: false, // Disable live reload, use HMR only
       };
     }
     
     return config;
+  },
+  
+  // PERMANENT FIX: Better dev server configuration
+  onDemandEntries: {
+    // Period (in ms) where the server will keep pages in the buffer
+    maxInactiveAge: 25 * 1000,
+    // Number of pages that should be kept simultaneously without being disposed
+    pagesBufferLength: 2,
   },
 }
 

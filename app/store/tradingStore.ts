@@ -54,6 +54,23 @@ interface TradingState {
     count: number;
   }>;
   
+  // Core Engine Analysis
+  coreEngineAnalysis: {
+    structure: string;
+    regime: string;
+    confidence: number;
+    reasoning?: string;
+    zones?: Array<{
+      type: 'BUY' | 'SELL';
+      entryPrice: number;
+      profitTarget: number;
+      stopLoss: number;
+      confidence: number;
+      reasoning: string;
+      time: number;
+    }>;
+  } | null;
+  
   // Actions
   setSelectedSymbol: (symbol: string) => void;
   setSelectedTimeframe: (timeframe: Timeframe) => void;
@@ -64,6 +81,21 @@ interface TradingState {
   setAllPairs: (pairs: TradingPair[], categorized: Record<string, TradingPair[]>) => void;
   setLoadingPairs: (loading: boolean) => void;
   setTickerData: (data: Record<string, { volume: number; priceChange: number; lastPrice: number; count: number }>) => void;
+  setCoreEngineAnalysis: (analysis: {
+    structure: string;
+    regime: string;
+    confidence: number;
+    reasoning?: string;
+    zones?: Array<{
+      type: 'BUY' | 'SELL';
+      entryPrice: number;
+      profitTarget: number;
+      stopLoss: number;
+      confidence: number;
+      reasoning: string;
+      time: number;
+    }>;
+  } | null) => void;
 }
 
 // Popular pairs for initial display
@@ -108,6 +140,7 @@ export const useTradingStore = create<TradingState>()(
       categorizedPairs: { USDT: POPULAR_PAIRS },
       isLoadingPairs: false,
       tickerData: {},
+      coreEngineAnalysis: null,
 
       // Actions
       setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
@@ -137,6 +170,7 @@ export const useTradingStore = create<TradingState>()(
       setLoadingPairs: (loading) => set({ isLoadingPairs: loading }),
       
       setTickerData: (data) => set({ tickerData: data }),
+      setCoreEngineAnalysis: (analysis) => set({ coreEngineAnalysis: analysis }),
     }),
     {
       name: 'trading-storage',
