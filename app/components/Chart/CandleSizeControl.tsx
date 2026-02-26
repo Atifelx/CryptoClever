@@ -22,23 +22,23 @@ export default function CandleSizeControl({ size, onSizeChange }: CandleSizeCont
   };
 
   return (
-    <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 flex items-center gap-2 bg-[#1a1a1a]/60 backdrop-blur-sm border border-gray-700/60 rounded-lg px-3 py-1.5">
+    <div className="absolute bottom-3 right-3 z-20 flex items-center gap-0.5 bg-[#131722]/95 border border-[#2a2e39] rounded shadow-lg">
       <button
         onClick={handleDecrease}
         disabled={size <= minSize}
-        className="w-7 h-7 flex items-center justify-center bg-[#2a2a2a]/80 hover:bg-[#3a3a3a]/80 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white font-bold text-lg transition-colors"
-        aria-label="Decrease candle size"
+        className="w-7 h-7 flex items-center justify-center text-[#d1d4dc] hover:bg-[#2a2e39] disabled:opacity-40 disabled:cursor-not-allowed rounded-l text-sm font-medium transition-colors"
+        aria-label="Zoom out"
       >
         −
       </button>
-      <span className="text-white text-xs font-semibold min-w-[2rem] text-center">
+      <span className="w-8 h-7 flex items-center justify-center text-xs text-[#d1d4dc] border-x border-[#2a2e39] bg-[#1e222d]">
         {size}
       </span>
       <button
         onClick={handleIncrease}
         disabled={size >= maxSize}
-        className="w-7 h-7 flex items-center justify-center bg-[#2a2a2a]/80 hover:bg-[#3a3a3a]/80 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white font-bold text-lg transition-colors"
-        aria-label="Increase candle size"
+        className="w-7 h-7 flex items-center justify-center text-[#d1d4dc] hover:bg-[#2a2e39] disabled:opacity-40 disabled:cursor-not-allowed rounded-r text-sm font-medium transition-colors"
+        aria-label="Zoom in"
       >
         +
       </button>

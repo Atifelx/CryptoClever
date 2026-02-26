@@ -24,6 +24,32 @@ body {
   overflow: hidden;
 }
 
+/* Live indicator dot glow (chart connection status) */
+@keyframes liveGlow {
+  0%, 100% { box-shadow: 0 0 4px rgba(34, 197, 94, 0.8); opacity: 1; }
+  50% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.9); opacity: 0.9; }
+}
+.live-dot-glow {
+  animation: liveGlow 1.5s ease-in-out infinite;
+}
+
+/* Circle before "Live" text: green glow + shrink/pulse */
+@keyframes liveGlowShrink {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.9);
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(34, 197, 94, 0.95);
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+}
+.live-dot-glow-shrink {
+  animation: liveGlowShrink 1.2s ease-in-out infinite;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

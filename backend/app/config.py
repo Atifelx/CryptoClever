@@ -5,14 +5,13 @@ from dotenv import load_dotenv
 # Load .env from backend directory so DATABASE_URL etc. can override defaults
 load_dotenv()
 
-# Curated symbols (Segment 1 + 2; Binance format)
+# Curated symbols: BTC, ETH, SOL, BNB, XRP only (Binance format)
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-    "LTCUSDT", "ADAUSDT", "ALGOUSDT", "ATOMUSDT", "MATICUSDT",
 ]
 
-# Intervals (Binance format; frontend uses 1D -> backend uses 1d)
-INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"]
+# Only 1m interval for live stream and REST (1000 candles)
+INTERVALS = ["1m"]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # Set to "1" or "true" to use in-memory store instead of Redis (no Redis needed for local testing)

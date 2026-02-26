@@ -102,18 +102,13 @@ interface TradingState {
   setShowHistory: (show: boolean) => void;
 }
 
-// Backend-driven symbols (Segment 1 + 2): same 10 as backend; fallback when backend unavailable
+// Backend-driven symbols: BTC, ETH, SOL, BNB, XRP only; fallback when backend unavailable
 export const BACKEND_SYMBOLS_FALLBACK: TradingPair[] = [
   { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', name: 'BTC/USDT', displayName: 'Bitcoin' },
   { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', name: 'ETH/USDT', displayName: 'Ethereum' },
   { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', name: 'SOL/USDT', displayName: 'Solana' },
   { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', name: 'BNB/USDT', displayName: 'BNB' },
   { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', name: 'XRP/USDT', displayName: 'XRP' },
-  { symbol: 'LTCUSDT', baseAsset: 'LTC', quoteAsset: 'USDT', name: 'LTC/USDT', displayName: 'Litecoin' },
-  { symbol: 'ADAUSDT', baseAsset: 'ADA', quoteAsset: 'USDT', name: 'ADA/USDT', displayName: 'Cardano' },
-  { symbol: 'ALGOUSDT', baseAsset: 'ALGO', quoteAsset: 'USDT', name: 'ALGO/USDT', displayName: 'Algorand' },
-  { symbol: 'ATOMUSDT', baseAsset: 'ATOM', quoteAsset: 'USDT', name: 'ATOM/USDT', displayName: 'Cosmos' },
-  { symbol: 'MATICUSDT', baseAsset: 'MATIC', quoteAsset: 'USDT', name: 'MATIC/USDT', displayName: 'Polygon' },
 ];
 
 export const SYMBOL_DISPLAY: Record<string, { name: string; base: string }> = Object.fromEntries(

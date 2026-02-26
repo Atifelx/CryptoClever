@@ -10,7 +10,6 @@ function getBackendUrl(): string | null {
 
 const FALLBACK_SYMBOLS = [
   'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-  'LTCUSDT', 'ADAUSDT', 'ALGOUSDT', 'ATOMUSDT', 'MATICUSDT',
 ];
 
 /**

@@ -6,7 +6,6 @@ import { useCandlesStore, Candle } from '../store/candlesStore';
 
 const BACKEND_SYMBOLS = [
   'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-  'LTCUSDT', 'ADAUSDT', 'ALGOUSDT', 'ATOMUSDT', 'MATICUSDT',
 ];
 
 const POLL_MS = 30_000; // 30 seconds once stable
@@ -23,7 +22,7 @@ function normalizeInterval(timeframe: string): string {
 }
 
 /**
- * Loads candle data for all 10 symbols from backend into Zustand on mount,
+ * Loads candle data for all 5 symbols from backend into Zustand on mount,
  * and polls every 30s. For the first 60s polls every 3s so we catch data as soon as backend bootstrap completes.
  */
 export function useBackendCandlesLoader() {

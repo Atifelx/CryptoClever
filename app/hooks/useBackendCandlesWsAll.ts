@@ -6,7 +6,6 @@ import { useCandlesStore, type Candle } from '../store/candlesStore';
 
 const BACKEND_SYMBOLS = [
   'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-  'LTCUSDT', 'ADAUSDT', 'ALGOUSDT', 'ATOMUSDT', 'MATICUSDT',
 ];
 
 function getBackendWsUrl(): string {
@@ -30,7 +29,7 @@ function normalizeInterval(timeframe: string): string {
 }
 
 /**
- * Single app-level WebSocket to the backend; subscribes to all 10 symbols for the current interval.
+ * Single app-level WebSocket to the backend; subscribes to all 5 symbols for the current interval.
  * Backend pushes live candles for each symbol; mergeCandle updates the store so all charts get real-time updates.
  * Call once at the app root (e.g. in the page that wraps the chart). Do not use useBackendCandlesWs per chart.
  */

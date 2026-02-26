@@ -3,7 +3,7 @@
 Integration check: run against a live backend (with Redis + Binance).
 Usage: from backend dir, after starting uvicorn and waiting for bootstrap:
   python3 tests/integration_check_streaming.py [--base-url http://localhost:8000]
-Exits 0 if all 10 symbols have at least one candle in Redis (any interval); else 1.
+Exits 0 if all 5 symbols have at least one candle in Redis (1m); else 1.
 """
 import argparse
 import sys
@@ -16,7 +16,6 @@ except ImportError:
 
 EXPECTED_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-    "LTCUSDT", "ADAUSDT", "ALGOUSDT", "ATOMUSDT", "MATICUSDT",
 ]
 
 
@@ -56,7 +55,7 @@ def main():
         print("Start backend with Redis and wait for bootstrap + a few minutes of streaming.", file=sys.stderr)
         return 1
 
-    print("OK: All 10 symbols have candle data in backend.")
+    print("OK: All 5 symbols have candle data in backend.")
     return 0
 
 

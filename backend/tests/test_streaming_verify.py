@@ -1,25 +1,24 @@
-"""Tests for backend: 10 symbols config and /streaming/status verification."""
+"""Tests for backend: 5 symbols config and /streaming/status verification."""
 import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-# Expected exactly 10 symbols (Segment 1 + 2) in Binance format
+# Expected exactly 5 symbols (BTC, ETH, SOL, BNB, XRP) in Binance format
 EXPECTED_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-    "LTCUSDT", "ADAUSDT", "ALGOUSDT", "ATOMUSDT", "MATICUSDT",
 ]
 
-EXPECTED_INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"]
+EXPECTED_INTERVALS = ["1m"]
 
 
 class TestConfig(unittest.TestCase):
-    """Verify config has exactly 10 symbols and expected intervals."""
+    """Verify config has exactly 5 symbols and 1m interval only."""
 
     def test_symbols_count(self):
         from app.config import SYMBOLS
-        self.assertEqual(len(SYMBOLS), 10, "SYMBOLS must have exactly 10 symbols")
+        self.assertEqual(len(SYMBOLS), 5, "SYMBOLS must have exactly 5 symbols")
 
     def test_symbols_match_expected(self):
         from app.config import SYMBOLS
@@ -35,7 +34,7 @@ class TestConfig(unittest.TestCase):
 
 
 class TestStreamingStatus(unittest.TestCase):
-    """Verify GET /streaming/status returns correct structure and uses all 10 symbols."""
+    """Verify GET /streaming/status returns correct structure and uses all 5 symbols."""
 
     def test_streaming_status_structure(self):
         # Patch so we don't need Redis or Binance
@@ -54,8 +53,8 @@ class TestStreamingStatus(unittest.TestCase):
         self.assertIn("symbols", data)
         self.assertIn("per_symbol", data)
         self.assertEqual(data["symbols"], EXPECTED_SYMBOLS)
-        self.assertEqual(len(data["per_symbol"]), 10 * len(EXPECTED_INTERVALS),
-                         "per_symbol must have 10 symbols x 6 intervals = 60 entries")
+        self.assertEqual(len(data["per_symbol"]), 5 * len(EXPECTED_INTERVALS),
+                         "per_symbol must have 5 symbols x 1 interval = 5 entries")
         for entry in data["per_symbol"]:
             self.assertIn(entry["symbol"], EXPECTED_SYMBOLS)
             self.assertIn(entry["interval"], EXPECTED_INTERVALS)

@@ -3,7 +3,7 @@ import { getCryptoLogoUrl, isCryptoIconApiUrl } from '../../../lib/cryptoLogos';
 import { getCachedCryptoLogo, cacheCryptoLogo } from '../../../lib/redis';
 
 /**
- * Pre-cache all 12 curated trading pair icons in Redis
+ * Pre-cache the 5 curated trading pair icons in Redis
  * This ensures all icons are always available in cache
  */
 async function preCacheCuratedIcons() {
@@ -11,18 +11,11 @@ async function preCacheCuratedIcons() {
     { symbol: 'BTCUSDT', base: 'BTC' },
     { symbol: 'ETHUSDT', base: 'ETH' },
     { symbol: 'SOLUSDT', base: 'SOL' },
-    { symbol: 'XRPUSDT', base: 'XRP' },
     { symbol: 'BNBUSDT', base: 'BNB' },
-    { symbol: 'AVAXUSDT', base: 'AVAX' },
-    { symbol: 'LINKUSDT', base: 'LINK' },
-    { symbol: 'DOTUSDT', base: 'DOT' },
-    { symbol: 'LTCUSDT', base: 'LTC' },
-    { symbol: 'TRXUSDT', base: 'TRX' },
-    { symbol: 'MATICUSDT', base: 'MATIC' },
-    { symbol: 'ADAUSDT', base: 'ADA' },
+    { symbol: 'XRPUSDT', base: 'XRP' },
   ];
 
-  // Pre-cache all 12 icons in parallel
+  // Pre-cache all 5 icons in parallel
   const cachePromises = curatedPairs.map(async ({ symbol, base }) => {
     try {
       // Check if already cached
@@ -53,7 +46,7 @@ async function preCacheCuratedIcons() {
  */
 export async function GET(request: NextRequest) {
   try {
-    // Pre-cache all 12 curated icons in Redis (async, don't block)
+    // Pre-cache the 5 curated icons in Redis (async, don't block)
     preCacheCuratedIcons();
 
     // Fetch exchange info from Binance

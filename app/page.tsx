@@ -9,7 +9,6 @@ import SearchBar from './components/Sidebar/SearchBar';
 import TimeframeSelector from './components/Header/TimeframeSelector';
 import Navbar from './components/Header/Navbar';
 import AccountInfo from './components/Footer/AccountInfo';
-import TradeHistoryPanel from './components/TradeHistoryPanel';
 import { useTradingStore } from './store/tradingStore';
 import { useBackendSettingsSync } from './hooks/useBackendSettingsSync';
 import { useBackendCandlesLoader } from './hooks/useBackendCandlesLoader';
@@ -20,7 +19,7 @@ import { PatternSignal } from './lib/indicators/patternRecognition';
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
-  const { selectedSymbol, selectedTimeframe, showHistory, setShowHistory } = useTradingStore();
+  const { selectedSymbol, selectedTimeframe } = useTradingStore();
   useBackendSettingsSync();
   useBackendCandlesLoader(); // Load all 10 symbols into Zustand, poll backend every 30s
   // Live candles are provided by `useCandles()` inside `TradingChart` (per-symbol WS).
@@ -121,15 +120,13 @@ export default function Home() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        {/* Header */}
+        {/* Header + compact controls (Indicators, Semafor, Core Engine in one row) */}
         <Navbar />
-        <div className="bg-[#1a1a1a] border-b border-gray-800 p-4 space-y-3">
+        <div className="bg-[#1a1a1a] border-b border-gray-800 py-2 px-4 flex flex-wrap items-center justify-between gap-2">
           <TimeframeSelector 
             enabledIndicators={enabledIndicators}
             onToggleIndicator={handleToggleIndicator}
           />
-          
-          {/* Indicator Dashboard - Compact, just below timeframe buttons */}
           <IndicatorDashboard
             enabledIndicators={enabledIndicators}
             semaforPoints={indicatorData.semaforPoints}
@@ -155,8 +152,6 @@ export default function Home() {
         {/* Footer */}
         <AccountInfo />
       </div>
-
-      {showHistory && <TradeHistoryPanel onClose={() => setShowHistory(false)} />}
     </div>
   );
 }

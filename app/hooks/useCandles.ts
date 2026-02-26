@@ -80,6 +80,26 @@ function normalizeCandles(
   }));
 }
 
+/**
+ * Merge refetched REST candles with current state to fill a gap without losing
+ * live WebSocket candles that arrived during or after the refetch.
+ * Returns: refetched list + any current candles newer than last refetched, deduped, cap 1000.
+ */
+function mergeRefetchedWithCurrent(
+  refetched: Candle[],
+  current: Candle[]
+): Candle[] {
+  if (refetched.length === 0) return current;
+  const lastRefetchedTs = refetched[refetched.length - 1].timestamp;
+  const newer = current.filter((c) => c.timestamp > lastRefetchedTs);
+  if (newer.length === 0) return refetched;
+  const byTs = new Map<number, Candle>();
+  refetched.forEach((c) => byTs.set(c.timestamp, c));
+  newer.forEach((c) => byTs.set(c.timestamp, c));
+  const merged = Array.from(byTs.values()).sort((a, b) => a.timestamp - b.timestamp);
+  return merged.length > 1000 ? merged.slice(-1000) : merged;
+}
+
 export function useCandles(symbol: string) {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -89,7 +109,11 @@ export function useCandles(symbol: string) {
   const reconnectAttemptsRef = useRef(0);
 
   const fetchCandles = useCallback(
-    (onSuccess?: (normalized: Candle[]) => void) => {
+    (options?: {
+      onSuccess?: (normalized: Candle[]) => void;
+      /** When true, do not replace state; caller merges refetched with current (used for gap refill). */
+      mergeWithCurrent?: boolean;
+    }) => {
       const baseUrl = getBackendBaseUrl();
       const url = `${baseUrl}/candles/${symbol}/1m?limit=1000`;
       fetch(url)
@@ -102,8 +126,10 @@ export function useCandles(symbol: string) {
           }) => {
             const rawCandles = Array.isArray(data.candles) ? data.candles : [];
             const normalized = normalizeCandles(rawCandles, symbol);
-            setCandles(normalized);
-            onSuccess?.(normalized);
+            if (!options?.mergeWithCurrent) {
+              setCandles(normalized);
+            }
+            options?.onSuccess?.(normalized);
           }
         )
         .catch((error) => {
@@ -173,9 +199,14 @@ export function useCandles(symbol: string) {
               return updatedCandles;
             }
 
-            // Optional: on forward gap, refetch in background to fill gap; still append so chart stays live
+            // On forward gap: refetch to fill missing candles (REST has them); merge with current so we keep live WS candles
             if (newCandle.timestamp - lastCandle.timestamp > ONE_INTERVAL_MS) {
-              fetchCandles();
+              fetchCandles({
+                mergeWithCurrent: true,
+                onSuccess: (normalized) => {
+                  setCandles((prev) => mergeRefetchedWithCurrent(normalized, prev));
+                },
+              });
             }
 
             updatedCandles.push(newCandle);

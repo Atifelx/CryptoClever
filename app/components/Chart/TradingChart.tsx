@@ -303,12 +303,19 @@ export default function TradingChart({
         const ts = chart.timeScale();
         const vr = ts.getVisibleRange();
         if (!vr || typeof vr.from !== 'number' || typeof vr.to !== 'number') return;
+        const rect = container.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const width = rect.width;
+        const pivot = ts.coordinateToTime(x) as number;
+        if (pivot == null || typeof pivot !== 'number') return;
         const range = vr.to - vr.from;
-        const center = (vr.from + vr.to) / 2;
-        const newRange = range * zoomFactor;
+        const newRange = Math.max(10, Math.min(range * zoomFactor, 10000));
+        const ratio = width > 0 ? x / width : 0.5;
+        const from = pivot - ratio * newRange;
+        const to = pivot + (1 - ratio) * newRange;
         ts.setVisibleRange({
-          from: (center - newRange / 2) as Time,
-          to: (center + newRange / 2) as Time,
+          from: from as Time,
+          to: to as Time,
         });
       };
 
@@ -527,14 +534,21 @@ export default function TradingChart({
       {/* Connection status indicator */}
       <div className="flex items-center gap-2 mb-4 px-1">
         <div
-          className={`w-3 h-3 rounded-full flex-shrink-0 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
+          className={`w-3 h-3 rounded-full flex-shrink-0 ${isConnected ? 'bg-green-500 live-dot-glow' : 'bg-red-500'}`}
           title={isConnected ? 'Connected' : 'Disconnected'}
         />
         <span className="font-semibold text-white">{symbol}</span>
-        <span className="text-sm text-gray-400">
-          {isConnected ? '● Live' : '○ Disconnected'}
-        </span>
-        <span className="text-sm text-gray-500">({candles.length} candles)</span>
+        {isConnected ? (
+          <>
+            <div
+              className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0 live-dot-glow-shrink"
+              aria-hidden
+            />
+            <span className="text-sm text-gray-400">Live</span>
+          </>
+        ) : (
+          <span className="text-sm text-gray-400">○ Disconnected</span>
+        )}
       </div>
 
       <div className="relative flex-1 min-h-0">
@@ -550,7 +564,7 @@ export default function TradingChart({
           </div>
         )}
         
-        {/* Candle Size Control - Top Middle */}
+        {/* Zoom control - bottom right (TradingView style) */}
         <CandleSizeControl size={candleSize} onSizeChange={setCandleSize} />
 
         {/* Price display */}
