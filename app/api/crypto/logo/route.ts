@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedCryptoLogo, cacheCryptoLogo } from '../../../lib/redis';
-import { getCryptoLogoUrl } from '../../../lib/cryptoLogos';
+import { getCryptoLogoUrl, isCryptoIconApiUrl } from '../../../lib/cryptoLogos';
 
 /**
  * API Route to get crypto logo URL with Redis caching
  * GET /api/crypto/logo?symbol=BTCUSDT&baseAsset=BTC
- * 
- * Uses CoinGecko CDN as primary source (100% reliable, 24/7, free, no rate limits)
- * Falls back to ui-avatars.com if CoinGecko icon not available
- * 
- * Icons are cached in Redis forever (since CoinGecko icons don't change)
+ *
+ * Uses cryptoicon-api as primary source (https://farisaziz12.github.io/cryptoicon-api/icons/)
+ * Falls back to ui-avatars.com when icon is invalid or fails
+ *
+ * Icons are cached in Redis (long-lived for cryptoicon-api)
  */
 export async function GET(request: NextRequest) {
   try {
@@ -40,16 +40,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Generate logo URL (CoinGecko CDN first, fallback to ui-avatars)
+    // Generate logo URL (cryptoicon-api first, fallback to ui-avatars)
     const logoUrl = getCryptoLogoUrl(symbol, baseAsset || undefined);
-    
-    // Determine source
-    const isCoinGecko = logoUrl.includes('coin-images.coingecko.com');
-    const source = isCoinGecko ? 'coingecko' : 'ui-avatars';
 
-    // Cache in Redis - CoinGecko icons cache forever (no expiry), fallback cache for 30 days
-    // Since CoinGecko icons don't change, we can cache them indefinitely
-    const ttl = isCoinGecko ? 0 : 2592000; // 0 = no expiry for CoinGecko, 30 days for fallback
+    const isCryptoIcon = isCryptoIconApiUrl(logoUrl);
+    const source = isCryptoIcon ? 'cryptoicon-api' : 'ui-avatars';
+
+    // Cache in Redis - cryptoicon-api icons long-lived, fallback 30 days
+    const ttl = isCryptoIcon ? 0 : 2592000;
     cacheCryptoLogo(symbol, logoUrl, ttl).catch(() => {});
 
     return NextResponse.json(
@@ -59,9 +57,9 @@ export async function GET(request: NextRequest) {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
-          'Cache-Control': isCoinGecko
-            ? 'public, s-maxage=31536000, immutable' // CoinGecko icons: cache forever
-            : 'public, s-maxage=2592000, stale-while-revalidate=86400', // Fallback: 30 days
+          'Cache-Control': isCryptoIcon
+            ? 'public, s-maxage=31536000, immutable'
+            : 'public, s-maxage=2592000, stale-while-revalidate=86400',
         },
       }
     );

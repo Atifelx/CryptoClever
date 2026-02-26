@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCryptoLogoUrl } from '../../../lib/cryptoLogos';
+import { getCryptoLogoUrl, isCryptoIconApiUrl } from '../../../lib/cryptoLogos';
 import { getCachedCryptoLogo, cacheCryptoLogo } from '../../../lib/redis';
 
 /**
@@ -31,10 +31,10 @@ async function preCacheCuratedIcons() {
 
       // Generate logo URL
       const logoUrl = getCryptoLogoUrl(symbol, base);
-      
-      // Cache in Redis (permanent for CoinGecko icons)
-      const isCoinGecko = logoUrl.includes('coin-images.coingecko.com');
-      const ttl = isCoinGecko ? 0 : 2592000; // 0 = no expiry for CoinGecko, 30 days for fallback
+
+      // Cache in Redis (long-lived for cryptoicon-api icons)
+      const isCryptoIcon = isCryptoIconApiUrl(logoUrl);
+      const ttl = isCryptoIcon ? 0 : 2592000;
       await cacheCryptoLogo(symbol, logoUrl, ttl);
       console.log(`✅ Pre-cached icon for ${symbol} (${base}): ${logoUrl}`);
     } catch (error) {
@@ -189,21 +189,20 @@ export async function GET(request: NextRequest) {
       ? activePairs.filter((s: any) => topVolumePairs.has(s.symbol))
       : activePairs.slice(0, 80); // Fallback: take first 80 if no volume data
     
-    // Process pairs and generate logos (ui-avatars is instant, no need for async)
+    // Process pairs and generate logos (cryptoicon-api primary)
     for (const symbol of pairsToProcess) {
       const quoteAsset = symbol.quoteAsset;
       const baseAsset = symbol.baseAsset;
       const symbolKey = symbol.symbol;
       
-      // Generate logo URL (CoinGecko CDN first, fallback to ui-avatars)
+      // Generate logo URL (cryptoicon-api, fallback ui-avatars)
       const logoUrl = getCryptoLogoUrl(symbolKey, baseAsset);
-      
+
       // Cache in Redis (async, don't block)
-      // CoinGecko icons cache forever (TTL=0), fallback cache for 30 days
       getCachedCryptoLogo(symbolKey).then((cached) => {
         if (!cached) {
-          const isCoinGecko = logoUrl.includes('coin-images.coingecko.com');
-          const ttl = isCoinGecko ? 0 : 2592000; // 0 = no expiry for CoinGecko, 30 days for fallback
+          const isCryptoIcon = isCryptoIconApiUrl(logoUrl);
+          const ttl = isCryptoIcon ? 0 : 2592000;
           cacheCryptoLogo(symbolKey, logoUrl, ttl).catch(() => {});
         }
       }).catch(() => {});

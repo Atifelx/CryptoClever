@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTradingStore } from '../../store/tradingStore';
 import { Star } from 'lucide-react';
-import { getCryptoLogoUrl } from '../../lib/cryptoLogos';
+import { getCryptoLogoUrl, getFallbackAvatarUrl } from '../../lib/cryptoLogos';
 import { BACKEND_SYMBOLS_FALLBACK, SYMBOL_DISPLAY } from '../../store/tradingStore';
 import type { TradingPair } from '../../store/tradingStore';
 
@@ -113,7 +113,7 @@ export default function SymbolList() {
             alt={name}
             className="w-6 h-6 rounded-full flex-shrink-0"
             onError={(e) => {
-              e.currentTarget.src = getCryptoLogoUrl(symbol, base);
+              e.currentTarget.src = getFallbackAvatarUrl(symbol, base);
             }}
           />
           <div className="flex flex-col min-w-0 flex-1">

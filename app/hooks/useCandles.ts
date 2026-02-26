@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 
 // Define the candle data structure
 interface Candle {
@@ -14,130 +14,223 @@ interface Candle {
   is_closed: boolean;
 }
 
-export function useCandles(symbol: string) {
-  // Store candle data
-  const [candles, setCandles] = useState<Candle[]>([]);
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 4000, 4000];
+/** 1m interval in ms; used to optionally trigger background refetch on gap. */
+const ONE_INTERVAL_MS = 60 * 1000;
 
-  // Track connection status
+/**
+ * Normalize WebSocket message to a single Candle with timestamp in ms.
+ * Supports: (1) flat object with timestamp (ms, from /ws/candles/{symbol}),
+ *          (2) nested { type, symbol, interval, candle } with candle.time in seconds.
+ */
+function normalizeWsMessage(
+  data: Record<string, unknown>,
+  symbol: string
+): Candle {
+  const raw = (data.candle ?? data) as Record<string, unknown>;
+  const t = raw.time ?? raw.timestamp;
+  const ts =
+    typeof t === 'number'
+      ? t < 1e10
+        ? t * 1000
+        : t
+      : 0;
+  return {
+    symbol: (raw.symbol ?? data.symbol ?? symbol) as string,
+    timestamp: ts,
+    open: Number(raw.open) || 0,
+    high: Number(raw.high) || 0,
+    low: Number(raw.low) || 0,
+    close: Number(raw.close) || 0,
+    volume: Number(raw.volume) || 0,
+    is_closed: raw.is_closed !== false,
+  };
+}
+
+/** Backend base URL for REST; fallback when NEXT_PUBLIC_BACKEND_URL is unset. */
+function getBackendBaseUrl(): string {
+  const u = process.env.NEXT_PUBLIC_BACKEND_URL;
+  const base = (u && u.trim()) ? u.trim().replace(/\/$/, '') : 'http://localhost:8000';
+  return base;
+}
+
+/** WebSocket base URL (ws or wss) from the same host/port as backend. */
+function getBackendWsBaseUrl(): string {
+  const base = getBackendBaseUrl();
+  return base.replace(/^https/, 'wss').replace(/^http/, 'ws');
+}
+
+function normalizeCandles(
+  rawCandles: Array<Record<string, unknown>>,
+  symbol: string
+): Candle[] {
+  return rawCandles.map((c) => ({
+    symbol,
+    timestamp:
+      typeof (c as { time?: number }).time === 'number'
+        ? (c as { time: number }).time * 1000
+        : ((c as { timestamp?: number }).timestamp ?? 0),
+    open: Number((c as { open?: number }).open) || 0,
+    high: Number((c as { high?: number }).high) || 0,
+    low: Number((c as { low?: number }).low) || 0,
+    close: Number((c as { close?: number }).close) || 0,
+    volume: Number((c as { volume?: number }).volume) || 0,
+    is_closed: true,
+  }));
+}
+
+export function useCandles(symbol: string) {
+  const [candles, setCandles] = useState<Candle[]>([]);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Store WebSocket reference
   const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+
+  const fetchCandles = useCallback(
+    (onSuccess?: (normalized: Candle[]) => void) => {
+      const baseUrl = getBackendBaseUrl();
+      const url = `${baseUrl}/candles/${symbol}/1m?limit=1000`;
+      fetch(url)
+        .then((response) => response.json())
+        .then(
+          (data: {
+            symbol?: string;
+            interval?: string;
+            candles?: Array<Record<string, unknown>>;
+          }) => {
+            const rawCandles = Array.isArray(data.candles) ? data.candles : [];
+            const normalized = normalizeCandles(rawCandles, symbol);
+            setCandles(normalized);
+            onSuccess?.(normalized);
+          }
+        )
+        .catch((error) => {
+          console.error(`Failed to load candles for ${symbol}:`, error);
+        });
+    },
+    [symbol]
+  );
 
   useEffect(() => {
-    console.log(`Setting up connection for ${symbol}`);
     let didUnmount = false;
+    reconnectAttemptsRef.current = 0;
 
-    // Clear candles on symbol change so the chart never shows the previous symbol's data
+    console.log(`Setting up connection for ${symbol}`);
     setCandles([]);
 
-    // STEP A: Load initial 1000 candles from your backend REST API
-    // Backend: GET /candles/{symbol}/1m returns { symbol, interval, candles: [...] }
-    const restUrl = `http://localhost:8000/candles/${symbol}/1m?limit=1000`;
-    console.log(`Loading initial candles for ${symbol}...`);
-    fetch(restUrl)
-      .then((response) => response.json())
-      .then((data: { symbol?: string; interval?: string; candles?: Array<Record<string, unknown>> }) => {
-        if (didUnmount) return;
-        const rawCandles = Array.isArray(data.candles) ? data.candles : [];
-        // Normalize backend format { time, open, high, low, close, volume } to Candle
-        const normalized: Candle[] = rawCandles.map((c) => ({
-          symbol: symbol,
-          timestamp: typeof (c as { time?: number }).time === 'number' ? (c as { time: number }).time * 1000 : (c as { timestamp?: number }).timestamp ?? 0,
-          open: Number((c as { open?: number }).open) || 0,
-          high: Number((c as { high?: number }).high) || 0,
-          low: Number((c as { low?: number }).low) || 0,
-          close: Number((c as { close?: number }).close) || 0,
-          volume: Number((c as { volume?: number }).volume) || 0,
-          is_closed: true,
-        }));
-        console.log(`Loaded ${normalized.length} initial candles for ${symbol}`);
-        setCandles(normalized);
-      })
-      .catch((error) => {
-        if (didUnmount) return;
-        console.error(`Failed to load initial candles for ${symbol}:`, error);
-      });
+    // Initial REST load
+    fetchCandles();
 
-    // STEP B: Connect to YOUR backend WebSocket (NOT Binance!)
-    const websocketUrl = `ws://localhost:8000/ws/candles/${symbol}`;
-    console.log(`Connecting to backend WebSocket: ${websocketUrl}`);
+    const wsBase = getBackendWsBaseUrl();
+    const websocketUrl = `${wsBase}/ws/candles/${symbol}`;
 
-    const ws = new WebSocket(websocketUrl);
-    wsRef.current = ws;
-
-    // When connection opens
-    ws.onopen = () => {
+    function connect() {
       if (didUnmount) return;
-      console.log(`✅ Connected to backend for ${symbol}`);
-      setIsConnected(true);
-    };
+      if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    // When we receive a message from backend
-    ws.onmessage = (event) => {
-      if (didUnmount) return;
-      // Parse the candle data
-      const newCandle: Candle = JSON.parse(event.data);
-      console.log(`Received candle update for ${symbol}:`, newCandle);
+      console.log(
+        reconnectAttemptsRef.current === 0
+          ? `Connecting to backend WebSocket: ${websocketUrl}`
+          : `Reconnecting (attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS})...`
+      );
 
-      // Update the candles array
-      setCandles((previousCandles) => {
-        // Make a copy of the array
-        const updatedCandles = [...previousCandles];
+      const ws = new WebSocket(websocketUrl);
+      wsRef.current = ws;
+      const isReconnect = reconnectAttemptsRef.current > 0;
 
-        // Check if this is updating the last candle or adding a new one
-        if (updatedCandles.length > 0) {
-          const lastCandle = updatedCandles[updatedCandles.length - 1];
+      ws.onopen = () => {
+        if (didUnmount) return;
+        reconnectAttemptsRef.current = 0;
+        console.log(`✅ Connected to backend for ${symbol}`);
+        setIsConnected(true);
 
-          // Same timestamp = update the existing candle (it's still forming)
-          if (lastCandle.timestamp === newCandle.timestamp) {
-            console.log(`Updating existing candle at index ${updatedCandles.length - 1}`);
-            updatedCandles[updatedCandles.length - 1] = newCandle;
-          }
-          // Different timestamp = new candle started
-          else {
-            console.log(`Adding new candle`);
-            updatedCandles.push(newCandle);
-
-            // Keep only the last 1000 candles
-            if (updatedCandles.length > 1000) {
-              updatedCandles.shift(); // Remove the oldest
-            }
-          }
-        } else {
-          // First candle
-          updatedCandles.push(newCandle);
+        // Option B: after reconnect, re-fetch last 1000 to align with backend
+        if (isReconnect) {
+          fetchCandles();
         }
+      };
 
-        return updatedCandles;
-      });
-    };
+      ws.onmessage = (event) => {
+        if (didUnmount) return;
+        let data: Record<string, unknown>;
+        try {
+          data = JSON.parse(event.data as string) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        const newCandle = normalizeWsMessage(data, symbol);
 
-    // When there's an error
-    ws.onerror = (error) => {
-      // In React strict-mode dev, effects mount/unmount twice; ignore errors after cleanup.
-      if (didUnmount) return;
-      console.error(`WebSocket error for ${symbol}:`, error);
-    };
+        setCandles((previousCandles) => {
+          const updatedCandles = [...previousCandles];
 
-    // When connection closes
-    ws.onclose = () => {
-      if (didUnmount) return;
-      console.log(`❌ Disconnected from backend for ${symbol}`);
-      setIsConnected(false);
-    };
+          if (updatedCandles.length > 0) {
+            const lastCandle = updatedCandles[updatedCandles.length - 1];
 
-    // Cleanup function - runs when component unmounts
+            if (lastCandle.timestamp === newCandle.timestamp) {
+              updatedCandles[updatedCandles.length - 1] = newCandle;
+              return updatedCandles;
+            }
+
+            // Optional: on forward gap, refetch in background to fill gap; still append so chart stays live
+            if (newCandle.timestamp - lastCandle.timestamp > ONE_INTERVAL_MS) {
+              fetchCandles();
+            }
+
+            updatedCandles.push(newCandle);
+            if (updatedCandles.length > 1000) updatedCandles.shift();
+          } else {
+            updatedCandles.push(newCandle);
+          }
+
+          return updatedCandles;
+        });
+      };
+
+      ws.onerror = (error) => {
+        if (didUnmount) return;
+        console.error(`WebSocket error for ${symbol}:`, error);
+      };
+
+      ws.onclose = () => {
+        if (didUnmount) return;
+        wsRef.current = null;
+        console.log(`❌ Disconnected from backend for ${symbol}`);
+        setIsConnected(false);
+
+        if (
+          reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS
+        ) {
+          const delay =
+            RECONNECT_DELAYS_MS[
+              Math.min(reconnectAttemptsRef.current, RECONNECT_DELAYS_MS.length - 1)
+            ];
+          reconnectAttemptsRef.current += 1;
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectTimeoutRef.current = null;
+            connect();
+          }, delay);
+        }
+      };
+    }
+
+    connect();
+
     return () => {
       console.log(`Cleaning up connection for ${symbol}`);
       didUnmount = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       if (wsRef.current) {
         wsRef.current.close();
+        wsRef.current = null;
       }
     };
-  }, [symbol]); // Re-run if symbol changes
+  }, [symbol, fetchCandles]);
 
-  // Return data and connection status
   return {
     candles,
     isConnected,
