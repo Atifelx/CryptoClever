@@ -97,7 +97,7 @@ export default function RootLayout({
                   const day = istDate.getUTCDate().toString().padStart(2, '0');
                   const month = (istDate.getUTCMonth() + 1).toString().padStart(2, '0');
                   const year = istDate.getUTCFullYear();
-                  return \`\${day}/\${month}/\${year} \${hours}:\${minutes} IST\`;
+                  return day + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' IST';
                 };
                 
                 console.log('✅ IST timezone override applied (GMT+5:30)');
@@ -158,68 +158,6 @@ export default function RootLayout({
                   }
                   window.history.replaceState({}, '', newUrl);
                 }
-                
-                // PERMANENT FIX: Intercept and retry failed chunk requests
-                (function() {
-                  var originalFetch = window.fetch;
-                  window.fetch = function() {
-                    var args = Array.prototype.slice.call(arguments);
-                    var self = this;
-                    return originalFetch.apply(self, args).catch(function(error) {
-                      // If it's a chunk loading error, retry once after clearing cache
-                      var url = args[0];
-                      if (typeof url === 'string' && url.includes('/_next/static/')) {
-                        console.warn('Chunk load failed, retrying after cache clear:', url);
-                        // Clear cache and retry
-                        if ('caches' in window) {
-                          return caches.keys().then(function(names) {
-                            return Promise.all(names.map(function(name) {
-                              return caches.delete(name);
-                            }));
-                          }).then(function() {
-                            return originalFetch.apply(self, args);
-                          }).catch(function() {
-                            // If retry fails, return original error
-                            return Promise.reject(error);
-                          });
-                        }
-                      }
-                      return Promise.reject(error);
-                    });
-                  };
-                })();
-                
-                // PERMANENT FIX: Handle script tag errors (chunk loading failures)
-                var chunkErrorRetryCount = 0;
-                var maxRetries = 2;
-                window.addEventListener('error', function(event) {
-                  if (event.target && event.target.tagName === 'SCRIPT') {
-                    var src = event.target.src || event.target.getAttribute('src');
-                    if (src && src.includes('/_next/static/')) {
-                      console.warn('Script chunk error detected:', src);
-                      chunkErrorRetryCount++;
-                      
-                      // Clear cache immediately
-                      if ('caches' in window) {
-                        caches.keys().then(function(names) {
-                          return Promise.all(names.map(function(name) {
-                            return caches.delete(name);
-                          }));
-                        });
-                      }
-                      
-                      // Retry by reloading if we haven't exceeded max retries
-                      if (chunkErrorRetryCount <= maxRetries) {
-                        console.log('Retrying chunk load...');
-                        setTimeout(function() {
-                          window.location.reload();
-                        }, 1000);
-                      } else {
-                        console.error('Max retries exceeded. Please manually refresh.');
-                      }
-                    }
-                  }
-                }, true);
               })();
             `,
           }}

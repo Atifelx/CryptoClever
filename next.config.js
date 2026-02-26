@@ -18,6 +18,12 @@ const nextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      { source: '/verify/candles', destination: '/api/backend/verify/candles', permanent: false },
+      { source: '/verify/live', destination: '/api/backend/verify/live', permanent: false },
+    ];
+  },
   async headers() {
     return [
       {
@@ -25,7 +31,8 @@ const nextConfig = {
         source: '/api/:path*',
         headers: [
           { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, OPTIONS' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PATCH, OPTIONS, DELETE' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
         ],
       },
       {

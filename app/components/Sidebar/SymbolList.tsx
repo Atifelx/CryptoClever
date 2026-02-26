@@ -4,70 +4,95 @@ import { useEffect, useState } from 'react';
 import { useTradingStore } from '../../store/tradingStore';
 import { Star } from 'lucide-react';
 import { getCryptoLogoUrl } from '../../lib/cryptoLogos';
-
-// CURATED LIST: Only high-quality, liquid trading pairs
-const CURATED_PAIRS = {
-  marketLeaders: [
-    { symbol: 'BTCUSDT', name: 'Bitcoin', base: 'BTC' },
-    { symbol: 'ETHUSDT', name: 'Ethereum', base: 'ETH' },
-    { symbol: 'SOLUSDT', name: 'Solana', base: 'SOL' },
-    { symbol: 'XRPUSDT', name: 'XRP', base: 'XRP' },
-    { symbol: 'BNBUSDT', name: 'BNB', base: 'BNB' },
-  ],
-  highLiquidity: [
-    { symbol: 'AVAXUSDT', name: 'Avalanche', base: 'AVAX' },
-    { symbol: 'LINKUSDT', name: 'Chainlink', base: 'LINK' },
-    { symbol: 'DOTUSDT', name: 'Polkadot', base: 'DOT' },
-    { symbol: 'LTCUSDT', name: 'Litecoin', base: 'LTC' },
-    { symbol: 'TRXUSDT', name: 'Tron', base: 'TRX' },
-    { symbol: 'MATICUSDT', name: 'Polygon', base: 'MATIC' },
-    { symbol: 'ADAUSDT', name: 'Cardano', base: 'ADA' },
-  ],
-};
+import { BACKEND_SYMBOLS_FALLBACK, SYMBOL_DISPLAY } from '../../store/tradingStore';
+import type { TradingPair } from '../../store/tradingStore';
 
 export default function SymbolList() {
-  const { 
-    selectedSymbol, 
-    favorites, 
-    setSelectedSymbol, 
-    toggleFavorite, 
+  const {
+    selectedSymbol,
+    favorites,
+    setSelectedSymbol,
+    toggleFavorite,
     searchQuery,
+    allPairs,
+    setAllPairs,
+    setLoadingPairs,
+    isLoadingPairs,
   } = useTradingStore();
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    new Set(['MARKET_LEADERS', 'HIGH_LIQUIDITY'])
+    new Set(['AVAILABLE'])
   );
 
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingPairs(true);
+    fetch('/api/backend/symbols', { headers: { Accept: 'application/json' } })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) return res.json();
+        return null;
+      })
+      .then((data: { symbols?: string[] } | null) => {
+        if (cancelled) return;
+        if (data?.symbols && Array.isArray(data.symbols)) {
+          const pairs: TradingPair[] = data.symbols
+            .filter((s) => SYMBOL_DISPLAY[s])
+            .map((s) => {
+              const d = SYMBOL_DISPLAY[s];
+              return {
+                symbol: s,
+                baseAsset: d.base,
+                quoteAsset: 'USDT',
+                name: `${d.base}/USDT`,
+                displayName: d.name,
+              };
+            });
+          if (pairs.length > 0) {
+            setAllPairs(pairs, { USDT: pairs });
+          }
+        } else {
+          setAllPairs(BACKEND_SYMBOLS_FALLBACK, { USDT: BACKEND_SYMBOLS_FALLBACK });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAllPairs(BACKEND_SYMBOLS_FALLBACK, { USDT: BACKEND_SYMBOLS_FALLBACK });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPairs(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [setAllPairs, setLoadingPairs]);
+
   const toggleSection = (section: string) => {
-    setExpandedSections(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(section)) {
-        newSet.delete(section);
-      } else {
-        newSet.add(section);
-      }
-      return newSet;
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
     });
   };
 
   const handleSymbolClick = (symbol: string) => {
-    console.log('📍 Symbol selected:', symbol);
     setSelectedSymbol(symbol);
   };
 
-  // Filter pairs based on search query
-  const filterPairs = (pairs: typeof CURATED_PAIRS.marketLeaders) => {
+  const filterPairs = (pairs: TradingPair[]) => {
     if (!searchQuery) return pairs;
-    const query = searchQuery.toLowerCase();
-    return pairs.filter(pair => 
-      pair.symbol.toLowerCase().includes(query) ||
-      pair.name.toLowerCase().includes(query) ||
-      pair.base.toLowerCase().includes(query)
+    const q = searchQuery.toLowerCase();
+    return pairs.filter(
+      (p) =>
+        p.symbol.toLowerCase().includes(q) ||
+        p.name.toLowerCase().includes(q) ||
+        p.baseAsset.toLowerCase().includes(q)
     );
   };
 
-  const filteredMarketLeaders = filterPairs(CURATED_PAIRS.marketLeaders);
-  const filteredHighLiquidity = filterPairs(CURATED_PAIRS.highLiquidity);
+  const filteredPairs = filterPairs(allPairs);
 
   const PairItem = ({ symbol, name, base }: { symbol: string; name: string; base: string }) => {
     const isFavorite = favorites.includes(symbol);
@@ -93,15 +118,12 @@ export default function SymbolList() {
           />
           <div className="flex flex-col min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <span className="text-sm font-medium text-white truncate">
-                {base}
-              </span>
+              <span className="text-sm font-medium text-white truncate">{base}</span>
               <span className="text-xs text-gray-500">/USDT</span>
             </div>
             <span className="text-xs text-gray-400 truncate">{name}</span>
           </div>
         </div>
-        
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -118,17 +140,16 @@ export default function SymbolList() {
     );
   };
 
-  const SectionHeader = ({ 
-    title, 
-    count, 
-    sectionId 
-  }: { 
-    title: string; 
-    count: number; 
+  const SectionHeader = ({
+    title,
+    count,
+    sectionId,
+  }: {
+    title: string;
+    count: number;
     sectionId: string;
   }) => {
     const isExpanded = expandedSections.has(sectionId);
-    
     return (
       <div
         className="px-3 py-2 bg-gray-800 cursor-pointer hover:bg-gray-750 transition-colors"
@@ -137,9 +158,7 @@ export default function SymbolList() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <svg
-              className={`w-4 h-4 text-gray-400 transition-transform ${
-                isExpanded ? 'rotate-90' : ''
-              }`}
+              className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -163,56 +182,36 @@ export default function SymbolList() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Market Leaders Section */}
-      <SectionHeader 
-        title="🏆 Market Leaders" 
-        count={filteredMarketLeaders.length} 
-        sectionId="MARKET_LEADERS"
+      <SectionHeader
+        title="Available pairs (backend)"
+        count={filteredPairs.length}
+        sectionId="AVAILABLE"
       />
-      {expandedSections.has('MARKET_LEADERS') && (
-        <div className="border-b border-gray-800">
-          {filteredMarketLeaders.map(pair => (
-            <PairItem
-              key={pair.symbol}
-              symbol={pair.symbol}
-              name={pair.name}
-              base={pair.base}
-            />
-          ))}
+      {expandedSections.has('AVAILABLE') && (
+        <div className="flex-1 overflow-y-auto border-b border-gray-800">
+          {isLoadingPairs ? (
+            <div className="p-4 text-center text-gray-500 text-sm">Loading symbols...</div>
+          ) : (
+            filteredPairs.map((pair) => (
+              <PairItem
+                key={pair.symbol}
+                symbol={pair.symbol}
+                name={pair.displayName || pair.name}
+                base={pair.baseAsset}
+              />
+            ))
+          )}
         </div>
       )}
 
-      {/* High Liquidity Section */}
-      <SectionHeader 
-        title="🚀 High Liquidity + Strong Volatility" 
-        count={filteredHighLiquidity.length} 
-        sectionId="HIGH_LIQUIDITY"
-      />
-      {expandedSections.has('HIGH_LIQUIDITY') && (
-        <div className="flex-1 overflow-y-auto">
-          {filteredHighLiquidity.map(pair => (
-            <PairItem
-              key={pair.symbol}
-              symbol={pair.symbol}
-              name={pair.name}
-              base={pair.base}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Search Results Info */}
-      {searchQuery && (filteredMarketLeaders.length + filteredHighLiquidity.length) === 0 && (
+      {searchQuery && filteredPairs.length === 0 && !isLoadingPairs && (
         <div className="p-4 text-center text-gray-500 text-sm">
           No pairs found for &quot;{searchQuery}&quot;
         </div>
       )}
 
-      {/* Total Count */}
       <div className="px-3 py-2 bg-gray-900 border-t border-gray-800">
-        <div className="text-xs text-gray-500">
-          Total: {filteredMarketLeaders.length + filteredHighLiquidity.length} pairs
-        </div>
+        <div className="text-xs text-gray-500">Total: {filteredPairs.length} pairs</div>
       </div>
     </div>
   );

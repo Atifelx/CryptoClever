@@ -48,7 +48,9 @@ npm install
 npm run dev
 ```
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser.
+To use port 3003 (e.g. if 3000 is in use): `npm run dev:3003` then open http://localhost:3003.
+
+5. Open [http://localhost:3000](http://localhost:3000) in your browser. Use the port that the terminal shows (default 3000). If you run with a different port (e.g. `npm run dev -- -p 3003`), open that port (e.g. http://localhost:3003). Opening a port where the dev server is not running causes 404 errors.
 
 ## 🚀 Deployment
 

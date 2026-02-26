@@ -1,10 +1,13 @@
 'use client';
 
 import { Search } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useTradingStore } from '../../store/tradingStore';
 
 export default function SearchBar() {
-  const { searchQuery, setSearchQuery } = useTradingStore();
+  const { searchQuery, setSearchQuery } = useTradingStore(
+    useShallow((state) => ({ searchQuery: state.searchQuery, setSearchQuery: state.setSearchQuery }))
+  );
 
   return (
     <div className="p-4 border-b border-gray-800">

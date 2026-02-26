@@ -187,11 +187,39 @@ export async function fetchBinanceHistory(
       volume: d.volume,
     }));
   } catch (error) {
-    // Don't log abort errors
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw error;
-    }
+    if (error instanceof Error && error.name === 'AbortError') throw error;
     console.error('Error fetching Binance history:', error);
     throw new Error(`Network error: Unable to connect to Binance API. ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+/**
+ * Clear Redis klines cache for a symbol/interval.
+ * Call on symbol switch so the next fetch gets fresh data from Binance (accuracy over speed).
+ */
+export async function clearKlinesCache(
+  symbol: string,
+  interval: string,
+  signal?: AbortSignal
+): Promise<void> {
+  try {
+    // Prefer DELETE; fallback POST with clear flag
+    const deleteUrl = `/api/binance/cache?symbol=${encodeURIComponent(symbol.toUpperCase())}&interval=${encodeURIComponent(interval)}`;
+    let response = await fetch(deleteUrl, { method: 'DELETE', signal });
+    if (response.status === 404) {
+      response = await fetch('/api/binance/cache', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear: true, symbol: symbol.toUpperCase(), interval }),
+        signal,
+      });
+    }
+    if (!response.ok) {
+      // Non-fatal: Redis may be unavailable or route not deployed
+      console.warn('Cache clear request failed:', response.status);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') throw err;
+    console.warn('Cache clear failed:', err);
   }
 }

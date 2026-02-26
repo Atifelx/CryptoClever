@@ -13,6 +13,11 @@ export function StoreHydration({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Safety: always show app after 3s even if rehydration hangs (e.g. chunk errors)
+    const safetyTimer = setTimeout(() => {
+      setIsHydrated(true);
+    }, 3000);
+
     // Clear any corrupted localStorage data first
     try {
       const stored = localStorage.getItem('trading-storage');
@@ -73,14 +78,14 @@ export function StoreHydration({ children }: { children: React.ReactNode }) {
       setIsHydrated(true);
     } catch (error) {
       console.error('Error rehydrating store:', error);
-      // Clear storage if rehydration fails
       try {
         localStorage.removeItem('trading-storage');
       } catch (e) {
         // Ignore
       }
-      setIsHydrated(true); // Still allow render with default state
+      setIsHydrated(true);
     }
+    return () => clearTimeout(safetyTimer);
   }, []);
 
   if (!isHydrated) {

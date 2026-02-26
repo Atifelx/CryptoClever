@@ -9,7 +9,10 @@ import SearchBar from './components/Sidebar/SearchBar';
 import TimeframeSelector from './components/Header/TimeframeSelector';
 import Navbar from './components/Header/Navbar';
 import AccountInfo from './components/Footer/AccountInfo';
+import TradeHistoryPanel from './components/TradeHistoryPanel';
 import { useTradingStore } from './store/tradingStore';
+import { useBackendSettingsSync } from './hooks/useBackendSettingsSync';
+import { useBackendCandlesLoader } from './hooks/useBackendCandlesLoader';
 import { INDICATOR_REGISTRY } from './lib/indicators/registry';
 import { SemaforPoint } from './lib/indicators/types';
 import type { SemaforTrend } from './lib/indicators/semafor';
@@ -17,7 +20,10 @@ import { PatternSignal } from './lib/indicators/patternRecognition';
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
-  const { selectedSymbol, selectedTimeframe } = useTradingStore();
+  const { selectedSymbol, selectedTimeframe, showHistory, setShowHistory } = useTradingStore();
+  useBackendSettingsSync();
+  useBackendCandlesLoader(); // Load all 10 symbols into Zustand, poll backend every 30s
+  // Live candles are provided by `useCandles()` inside `TradingChart` (per-symbol WS).
   
   // Initialize enabled indicators from registry defaults
   const [enabledIndicators, setEnabledIndicators] = useState<Set<string>>(() => {
@@ -136,7 +142,7 @@ export default function Home() {
         <TradingSignalsPanel />
 
         {/* Chart */}
-        <div className="flex-1 p-4 min-h-0">
+        <div key={`chart-${safeSymbol}-${safeTimeframe}`} className="flex-1 p-4 min-h-0">
           <TradingChart 
             symbol={safeSymbol}
             interval={safeTimeframe}
@@ -149,6 +155,8 @@ export default function Home() {
         {/* Footer */}
         <AccountInfo />
       </div>
+
+      {showHistory && <TradeHistoryPanel onClose={() => setShowHistory(false)} />}
     </div>
   );
 }

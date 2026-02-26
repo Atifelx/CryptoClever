@@ -54,6 +54,9 @@ interface TradingState {
     count: number;
   }>;
   
+  // Trade history panel visibility
+  showHistory: boolean;
+  
   // Core Engine Analysis
   coreEngineAnalysis: {
     structure: string;
@@ -96,21 +99,28 @@ interface TradingState {
       time: number;
     }>;
   } | null) => void;
+  setShowHistory: (show: boolean) => void;
 }
 
-// Popular pairs for initial display
-export const POPULAR_PAIRS: TradingPair[] = [
+// Backend-driven symbols (Segment 1 + 2): same 10 as backend; fallback when backend unavailable
+export const BACKEND_SYMBOLS_FALLBACK: TradingPair[] = [
   { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', name: 'BTC/USDT', displayName: 'Bitcoin' },
   { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', name: 'ETH/USDT', displayName: 'Ethereum' },
-  { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', name: 'BNB/USDT', displayName: 'Binance Coin' },
   { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', name: 'SOL/USDT', displayName: 'Solana' },
-  { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', name: 'XRP/USDT', displayName: 'Ripple' },
-  { symbol: 'ADAUSDT', baseAsset: 'ADA', quoteAsset: 'USDT', name: 'ADA/USDT', displayName: 'Cardano' },
-  { symbol: 'DOGEUSDT', baseAsset: 'DOGE', quoteAsset: 'USDT', name: 'DOGE/USDT', displayName: 'Dogecoin' },
-  { symbol: 'MATICUSDT', baseAsset: 'MATIC', quoteAsset: 'USDT', name: 'MATIC/USDT', displayName: 'Polygon' },
-  { symbol: 'DOTUSDT', baseAsset: 'DOT', quoteAsset: 'USDT', name: 'DOT/USDT', displayName: 'Polkadot' },
+  { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', name: 'BNB/USDT', displayName: 'BNB' },
+  { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', name: 'XRP/USDT', displayName: 'XRP' },
   { symbol: 'LTCUSDT', baseAsset: 'LTC', quoteAsset: 'USDT', name: 'LTC/USDT', displayName: 'Litecoin' },
+  { symbol: 'ADAUSDT', baseAsset: 'ADA', quoteAsset: 'USDT', name: 'ADA/USDT', displayName: 'Cardano' },
+  { symbol: 'ALGOUSDT', baseAsset: 'ALGO', quoteAsset: 'USDT', name: 'ALGO/USDT', displayName: 'Algorand' },
+  { symbol: 'ATOMUSDT', baseAsset: 'ATOM', quoteAsset: 'USDT', name: 'ATOM/USDT', displayName: 'Cosmos' },
+  { symbol: 'MATICUSDT', baseAsset: 'MATIC', quoteAsset: 'USDT', name: 'MATIC/USDT', displayName: 'Polygon' },
 ];
+
+export const SYMBOL_DISPLAY: Record<string, { name: string; base: string }> = Object.fromEntries(
+  BACKEND_SYMBOLS_FALLBACK.map((p) => [p.symbol, { name: p.displayName || p.name, base: p.baseAsset }])
+);
+
+export const POPULAR_PAIRS: TradingPair[] = [...BACKEND_SYMBOLS_FALLBACK];
 
 export const TIMEFRAMES = [
   { label: '1m', value: '1m' as Timeframe },
@@ -141,6 +151,7 @@ export const useTradingStore = create<TradingState>()(
       isLoadingPairs: false,
       tickerData: {},
       coreEngineAnalysis: null,
+      showHistory: false,
 
       // Actions
       setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
@@ -171,6 +182,7 @@ export const useTradingStore = create<TradingState>()(
       
       setTickerData: (data) => set({ tickerData: data }),
       setCoreEngineAnalysis: (analysis) => set({ coreEngineAnalysis: analysis }),
+      setShowHistory: (show) => set({ showHistory: show }),
     }),
     {
       name: 'trading-storage',

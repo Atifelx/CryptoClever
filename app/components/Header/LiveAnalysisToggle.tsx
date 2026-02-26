@@ -63,28 +63,45 @@ export default function LiveAnalysisToggle() {
     }
   }, [selectedSymbol, selectedTimeframe, setCoreEngineAnalysis]);
 
-  // Fetch analysis from API
+  // Fetch analysis from API (try backend signals first when backend is configured, else deep-analysis)
   const fetchAnalysis = async () => {
     if (!selectedSymbol || !selectedTimeframe) return;
 
     setLoading(true);
     try {
-      const response = await fetch('/api/deep-analysis', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          symbol: selectedSymbol,
-          timeframe: selectedTimeframe,
-        }),
-      });
+      const timeframe = selectedTimeframe === '1D' ? '1d' : selectedTimeframe.toLowerCase();
+      let data: AnalysisResult | null = null;
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      const backendRes = await fetch(
+        `/api/backend/signals/${encodeURIComponent(selectedSymbol)}/${encodeURIComponent(timeframe)}`
+      );
+      if (backendRes.ok) {
+        const backendData = await backendRes.json();
+        data = {
+          structure: backendData.structure ?? 'Range',
+          regime: backendData.regime ?? 'RANGE',
+          impulseScore: 0,
+          confidence: backendData.confidence ?? 0,
+          pivots: backendData.pivots ?? [],
+          reasoning: backendData.reasoning,
+          zones: backendData.zones ?? [],
+        };
       }
 
-      const data: AnalysisResult = await response.json();
+      if (!data) {
+        const response = await fetch('/api/deep-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: selectedSymbol,
+            timeframe: selectedTimeframe,
+          }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        data = await response.json();
+      }
+
+      if (!data) return;
       setAnalysis(data);
       
       // Get current price from trading data

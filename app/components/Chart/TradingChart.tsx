@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { createChart, IChartApi, ISeriesApi, ColorType, Time } from 'lightweight-charts';
-import { useBinanceWebSocket } from '../../hooks/useBinanceWebSocket';
-import { Candle } from '../../lib/binance';
+import { useCandles } from '../../hooks/useCandles';
+import type { Candle } from '../../store/candlesStore';
 import { calculateSemafor, getSemaforTrend } from '../../lib/indicators/semafor';
 import { SemaforPoint } from '../../lib/indicators/types';
 import type { SemaforTrend } from '../../lib/indicators/semafor';
@@ -25,8 +25,8 @@ interface TradingChartProps {
   }) => void;
 }
 
-export default function TradingChart({ 
-  symbol, 
+export default function TradingChart({
+  symbol,
   interval,
   enabledIndicators,
   onToggleIndicator,
@@ -37,16 +37,32 @@ export default function TradingChart({
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showBackendUnavailable, setShowBackendUnavailable] = useState(false);
   const [currentPrice, setCurrentPrice] = useState<number>(0);
-  const [candleSize, setCandleSize] = useState<number>(3); // Default barSpacing
+  const [candleSize, setCandleSize] = useState<number>(3);
   const userInteractedRef = useRef<boolean>(false);
   const isPanningRef = useRef<boolean>(false);
   const panStartXRef = useRef<number>(0);
   const panStartPositionRef = useRef<number | null>(null);
 
-  const { candles, isLoading } = useBinanceWebSocket(symbol, interval);
-  
-  // Track previous symbol/interval and candle count for efficient updates
+  const { candles: rawCandles, isConnected } = useCandles(symbol);
+
+  // Normalize useCandles format (timestamp ms) to chart format (time in seconds) for lightweight-charts and indicators
+  const candles: Candle[] = useMemo(
+    () =>
+      rawCandles.map((c) => ({
+        time: c.timestamp / 1000,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      })),
+    [rawCandles]
+  );
+  const isLoading = candles.length === 0;
+
+  // Track previous symbol/interval and candle count for efficient updates/interval and candle count for efficient updates
   const prevSymbolRef = useRef<string>(symbol);
   const prevIntervalRef = useRef<string>(interval);
   const prevCandlesLenRef = useRef<number>(0);
@@ -119,7 +135,7 @@ export default function TradingChart({
         if (!lockedPattern) {
           // No locked pattern - lock the new one
           lockedPatternRef.current = newPatterns;
-          console.log('🔒 Pattern locked:', newPattern.description, `(${newPattern.confidence}%)`);
+          console.log('[Pattern] Pattern locked:', newPattern.description, `(${newPattern.confidence}%)`);
           return newPatterns;
         }
 
@@ -138,7 +154,7 @@ export default function TradingChart({
             (newPattern.confidence >= lockedPattern.confidence + 15) ||
             (lockedPatternAge >= 10)) {
           lockedPatternRef.current = newPatterns;
-          console.log('🔒 Pattern updated:', newPattern.description, `(${newPattern.confidence}%) - Old pattern was ${lockedPatternAge} candles old`);
+          console.log('[Pattern] Pattern updated:', newPattern.description, `(${newPattern.confidence}%) - Old pattern was ${lockedPatternAge} candles old`);
           return newPatterns;
         }
       }
@@ -165,15 +181,13 @@ export default function TradingChart({
     lastClosedCandleTimeRef.current = 0;
   }, [symbol, interval]);
 
-  // Expose indicator data to parent component
+  // Expose indicator data to parent component (deferred to avoid setState-during-render)
   useEffect(() => {
-    if (onIndicatorDataUpdate) {
-      onIndicatorDataUpdate({
-        semaforPoints,
-        semaforTrend,
-        patternSignals,
-      });
-    }
+    if (!onIndicatorDataUpdate) return;
+    const payload = { semaforPoints, semaforTrend, patternSignals };
+    queueMicrotask(() => {
+      onIndicatorDataUpdate(payload);
+    });
   }, [semaforPoints, semaforTrend, patternSignals, onIndicatorDataUpdate]);
 
   // Initialize chart (only once)
@@ -342,192 +356,88 @@ export default function TradingChart({
     }
   }, [candleSize]);
 
-  // Clear chart data on symbol/interval change
+  // On symbol/interval change: only reset refs so data effect will setData(new symbol from store).
+  // Do NOT clear chart — store has per-symbol data so we draw new symbol immediately (no ghosting).
   useEffect(() => {
     if (prevSymbolRef.current !== symbol || prevIntervalRef.current !== interval) {
-      console.log('🔄 Symbol/Interval changed, clearing chart:', { 
-        oldSymbol: prevSymbolRef.current, 
-        newSymbol: symbol,
-        oldInterval: prevIntervalRef.current,
-        newInterval: interval 
-      });
-      
-      try {
-        // Clear all chart data
-        if (candleSeriesRef.current) {
-          candleSeriesRef.current.setData([]);
-        }
-        if (volumeSeriesRef.current) {
-          volumeSeriesRef.current.setData([]);
-        }
-      } catch (error) {
-        console.warn('Error clearing chart data:', error);
-      }
-      
-      // Reset all state
-      setCurrentPrice(0);
-      setLoading(true);
-      userInteractedRef.current = false;
-      prevCandlesLenRef.current = 0; // CRITICAL: Reset to force setData() on next load
-      
-      // Update refs
       prevSymbolRef.current = symbol;
       prevIntervalRef.current = interval;
-
-      // Reset time scale and force chart refresh
+      prevCandlesLenRef.current = 0; // force full setData in data effect
+      userInteractedRef.current = false;
       try {
         if (chartRef.current) {
           chartRef.current.timeScale().resetTimeScale();
-          
-          // Force chart resize to ensure it's visible
-          if (chartContainerRef.current) {
-            requestAnimationFrame(() => {
-              if (chartRef.current && chartContainerRef.current) {
-                chartRef.current.applyOptions({
-                  width: chartContainerRef.current.clientWidth,
-                  height: chartContainerRef.current.clientHeight || 600,
-                });
-                console.log('✅ Chart resized after symbol change');
-              }
-            });
-          }
         }
-      } catch (error) {
-        console.warn('Error resetting time scale:', error);
-      }
+      } catch {}
     }
   }, [symbol, interval]);
 
-  // Update chart data when candles change
-  // CRITICAL: Use setData() only on initial load / symbol change
-  // Use update() for real-time WebSocket ticks (faster, preserves markers)
+  // Update chart data when candles change (from Zustand store; candles are always for current symbol/interval).
   useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) {
-      console.log('⚠️ Chart series not ready, skipping update');
-      return;
-    }
-
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
     if (candles.length === 0) {
       setLoading(isLoading);
       prevCandlesLenRef.current = 0;
       return;
     }
 
-    if (candles.length > 0) {
-      setLoading(false);
-    }
+    setLoading(false);
+    const prevLen = prevCandlesLenRef.current;
+    const isInitialLoad = prevLen === 0;
+    const hasNewCandle = candles.length !== prevLen;
+    const isSymbolChange = prevSymbolRef.current !== symbol || prevIntervalRef.current !== interval;
 
-    try {
-      const prevLen = prevCandlesLenRef.current;
-      const isInitialLoad = prevLen === 0;
-      const hasNewCandle = candles.length !== prevLen;
-      
-      // Check if symbol/interval changed by comparing with current values
-      // This ensures we detect changes even if refs were updated in previous effect
-      const currentSymbol = symbol;
-      const currentInterval = interval;
-      const symbolChanged = prevSymbolRef.current !== currentSymbol;
-      const intervalChanged = prevIntervalRef.current !== currentInterval;
-      const isSymbolChange = symbolChanged || intervalChanged;
+    // Full setData when: initial load, symbol/interval changed, or new candle arrived.
+    if (isInitialLoad || isSymbolChange || hasNewCandle) {
+      const candlestickData = candles.map((c: Candle) => ({
+        time: c.time as Time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      }));
+      const volumeData = candles.map((c: Candle) => ({
+        time: c.time as Time,
+        value: c.volume || 0,
+        color: c.close >= c.open ? '#26a69a80' : '#ef535080',
+      }));
 
-      // CRITICAL: Always use setData() if:
-      // 1. Initial load (prevLen === 0)
-      // 2. Symbol/interval changed (force full refresh)
-      // 3. New candle added (length changed)
-      if (isInitialLoad || isSymbolChange || hasNewCandle) {
-        console.log('📊 Updating chart data:', {
-          isInitialLoad,
-          isSymbolChange,
-          hasNewCandle,
-          candleCount: candles.length,
-          prevLen,
-          symbol,
-          interval
-        });
-
-        // Full data replacement: initial load, new candle added, or symbol change
-        const candlestickData = candles.map((c: Candle) => ({
-          time: c.time as Time,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-        }));
-
-        const volumeData = candles.map((c: Candle) => ({
-          time: c.time as Time,
-          value: c.volume || 0,
-          color: c.close >= c.open ? '#26a69a80' : '#ef535080',
-        }));
-
-        if (candlestickData.length > 0) {
-          // CRITICAL: Always set data when symbol changes or initial load
-          try {
-            candleSeriesRef.current.setData(candlestickData);
-            volumeSeriesRef.current.setData(volumeData);
-            console.log('✅ Chart data set:', { count: candlestickData.length, symbol, interval });
-          } catch (error) {
-            console.error('❌ Error setting chart data:', error);
-            // Force chart refresh on error
-            if (chartRef.current && chartContainerRef.current) {
-              try {
-                chartRef.current.applyOptions({
-                  width: chartContainerRef.current.clientWidth,
-                  height: chartContainerRef.current.clientHeight || 600,
-                });
-              } catch (e) {
-                console.error('Error refreshing chart:', e);
-              }
-            }
-          }
-          
-          // Update current price
-          const lastCandle = candles[candles.length - 1];
-          if (lastCandle) {
-            setCurrentPrice(lastCandle.close);
-          }
-
-          // Fit content if user hasn't interacted or symbol changed
-          if (!userInteractedRef.current || isSymbolChange) {
-            // Use multiple requestAnimationFrame for better reliability
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                setTimeout(() => {
-                  try {
-                    if (chartRef.current && candlestickData.length > 0) {
-                      chartRef.current.timeScale().fitContent();
-                      // Force a resize to ensure chart renders
-                      if (chartContainerRef.current) {
-                        chartRef.current.applyOptions({
-                          width: chartContainerRef.current.clientWidth,
-                          height: chartContainerRef.current.clientHeight || 600,
-                        });
-                      }
-                      console.log('✅ Chart data updated, fitted, and refreshed');
-                    }
-                  } catch (error) {
-                    console.warn('Error fitting content:', error);
-                  }
-                }, 150); // Increased delay to ensure chart is ready
-              });
-            });
-          }
-          
-          // Update previous length AFTER setting data
-          prevCandlesLenRef.current = candles.length;
-          
-          // Update symbol/interval refs AFTER data is set (for next comparison)
-          if (isSymbolChange) {
-            prevSymbolRef.current = currentSymbol;
-            prevIntervalRef.current = currentInterval;
-          }
-        } else {
-          console.warn('⚠️ No candlestick data to set');
-        }
-      } else {
-        // Real-time tick update: only update the last candle (fast, preserves markers)
+      try {
+        candleSeriesRef.current.setData(candlestickData);
+        volumeSeriesRef.current.setData(volumeData);
         const lastCandle = candles[candles.length - 1];
-        if (lastCandle) {
+        if (lastCandle) setCurrentPrice(lastCandle.close);
+        prevCandlesLenRef.current = candles.length;
+        prevSymbolRef.current = symbol;
+        prevIntervalRef.current = interval;
+
+        if (!userInteractedRef.current || isSymbolChange) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              setTimeout(() => {
+                try {
+                  if (chartRef.current && candlestickData.length > 0) {
+                    chartRef.current.timeScale().fitContent();
+                    if (chartContainerRef.current && chartRef.current)
+                      chartRef.current.applyOptions({
+                        width: chartContainerRef.current.clientWidth,
+                        height: chartContainerRef.current.clientHeight || 600,
+                      });
+                  }
+                } catch {}
+              }, 150);
+            });
+          });
+        }
+      } catch (error) {
+        console.error('[Chart] Error setting chart data:', error);
+        setLoading(false);
+      }
+    } else {
+      // Same length, only last candle updated (e.g. from poll): use update().
+      const lastCandle = candles[candles.length - 1];
+      if (lastCandle) {
+        try {
           candleSeriesRef.current.update({
             time: lastCandle.time as Time,
             open: lastCandle.open,
@@ -540,19 +450,12 @@ export default function TradingChart({
             value: lastCandle.volume || 0,
             color: lastCandle.close >= lastCandle.open ? '#26a69a80' : '#ef535080',
           });
-          
-          // Update current price for real-time updates
           setCurrentPrice(lastCandle.close);
-          
-          // Update previous length
           prevCandlesLenRef.current = candles.length;
-        }
+        } catch {}
       }
-    } catch (error) {
-      console.error('Chart data error:', error);
-      setLoading(false);
     }
-  }, [candles, isLoading, symbol, interval]); // CRITICAL: Include symbol and interval to re-run on symbol change
+  }, [candles, isLoading, symbol, interval]);
 
   const isEnabled = (id: string) => enabledIndicators.has(id);
 
@@ -576,6 +479,17 @@ export default function TradingChart({
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [candles.length]);
+
+  // After 4s with no data, show backend-unavailable message (stable deps: always 3 elements)
+  useEffect(() => {
+    if (candles.length > 0) {
+      setShowBackendUnavailable(false);
+      return;
+    }
+    setShowBackendUnavailable(false);
+    const t = setTimeout(() => setShowBackendUnavailable(true), 4000);
+    return () => clearTimeout(t);
+  }, [symbol, interval, candles.length]);
 
   // Zoom controls
   const handleZoomIn = () => {
@@ -610,10 +524,29 @@ export default function TradingChart({
 
   return (
     <div className="flex flex-col w-full h-full">
+      {/* Connection status indicator */}
+      <div className="flex items-center gap-2 mb-4 px-1">
+        <div
+          className={`w-3 h-3 rounded-full flex-shrink-0 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
+          title={isConnected ? 'Connected' : 'Disconnected'}
+        />
+        <span className="font-semibold text-white">{symbol}</span>
+        <span className="text-sm text-gray-400">
+          {isConnected ? '● Live' : '○ Disconnected'}
+        </span>
+        <span className="text-sm text-gray-500">({candles.length} candles)</span>
+      </div>
+
       <div className="relative flex-1 min-h-0">
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-75 z-10">
-            <div className="text-white">Loading {symbol}...</div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#1a1a1a] bg-opacity-90 z-20">
+            <div className="w-10 h-10 border-2 border-[#26a69a] border-t-transparent rounded-full animate-spin mb-3" />
+            <div className="text-white font-medium">Loading {symbol}...</div>
+            <div className="text-gray-500 text-sm mt-1">
+              {showBackendUnavailable
+                ? 'No data from backend. Ensure the backend is running (e.g. port 8000) and BACKEND_URL is set. Bootstrap may take 30–60s on first start.'
+                : 'Loading data from backend'}
+            </div>
           </div>
         )}
         
@@ -628,11 +561,25 @@ export default function TradingChart({
               ${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div className="text-xs text-green-500 flex items-center gap-1 mt-1">
-              <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-              LIVE
+              <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+              {isConnected ? 'LIVE' : 'Disconnected'}
             </div>
           </div>
         </div>
+
+        {/* Debug: verify chart data is per-symbol (only when NEXT_PUBLIC_DEBUG_CHART=1) */}
+        {process.env.NEXT_PUBLIC_DEBUG_CHART === '1' && (
+          <div className="absolute top-4 left-4 z-10 text-xs font-mono text-gray-500 bg-[#1a1a1a]/90 px-2 py-1 rounded border border-[#2a2a2a]">
+            Symbol: <span className="text-gray-300">{symbol}</span>
+            {' · '}
+            Last close (from data):{' '}
+            <span className="text-gray-300">
+              {candles.length > 0
+                ? candles[candles.length - 1].close.toLocaleString(undefined, { maximumFractionDigits: 4 })
+                : '—'}
+            </span>
+          </div>
+        )}
 
         {/* Chart container */}
         <div ref={chartContainerRef} className="w-full h-full" />

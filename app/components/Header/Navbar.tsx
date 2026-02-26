@@ -3,7 +3,7 @@
 import { useTradingStore } from '../../store/tradingStore';
 
 export default function Navbar() {
-  const { selectedSymbol, allPairs } = useTradingStore();
+  const { selectedSymbol, allPairs, showHistory, setShowHistory } = useTradingStore();
   const selectedPair = allPairs.find((p) => p.symbol === selectedSymbol);
 
   return (
@@ -15,6 +15,13 @@ export default function Navbar() {
           </h2>
           <p className="text-sm text-gray-500">{selectedSymbol || 'BTCUSDT'}</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowHistory(true)}
+          className="px-3 py-1.5 text-sm rounded bg-gray-700 text-gray-200 hover:bg-gray-600"
+        >
+          History
+        </button>
       </div>
     </div>
   );
