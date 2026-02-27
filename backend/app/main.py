@@ -9,9 +9,9 @@ from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconne
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from app.binance_ws import bootstrap_all, run_binance_ws
+from app.binance_ws import bootstrap_all, bootstrap_symbol_interval, fetch_klines_range, run_binance_ws
 from app.config import INTERVALS, SYMBOLS
-from app.redis_store import get_candles, get_signals, set_signals, close_redis, get_last_append_time
+from app.redis_store import get_candles, get_signals, set_signals, close_redis, get_last_append_time, append_candle
 from app.indicators import compute_signals
 from app import database as db
 from app import ws_broadcast as ws_broadcast
@@ -739,6 +739,35 @@ class ConnectionManager:
                             "volume": float(kline["v"]),
                             "is_closed": kline["x"],  # Is this candle closed?
                         }
+
+                        # Sync store before broadcast: ensure no gap (bootstrap if empty, fill gap from REST)
+                        try:
+                            interval = "1m"
+                            data = await get_candles(symbol, interval, limit=1000)
+                            if not data:
+                                await bootstrap_symbol_interval(symbol, interval)
+                                data = await get_candles(symbol, interval, limit=1000)
+                            if data:
+                                last_ts = int(data[-1].get("time", 0))
+                                new_ts = int(candle["timestamp"] // 1000)
+                                if new_ts > last_ts + 60:
+                                    start_sec = last_ts + 60
+                                    end_sec = new_ts - 60
+                                    if end_sec >= start_sec:
+                                        gap_candles = await fetch_klines_range(symbol, interval, start_sec, end_sec)
+                                        for c in gap_candles:
+                                            await append_candle(symbol, interval, c)
+                            store_candle = {
+                                "time": int(candle["timestamp"] // 1000),
+                                "open": candle["open"],
+                                "high": candle["high"],
+                                "low": candle["low"],
+                                "close": candle["close"],
+                                "volume": candle["volume"],
+                            }
+                            await append_candle(symbol, interval, store_candle)
+                        except Exception as sync_err:
+                            logger.warning("Sync-before-broadcast for %s failed (broadcasting anyway): %s", symbol, sync_err)
 
                         # Broadcast this candle to all Next.js clients watching this symbol
                         await self.broadcast_to_clients(symbol, candle)

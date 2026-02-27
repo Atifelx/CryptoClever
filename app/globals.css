@@ -33,15 +33,15 @@ body {
   animation: liveGlow 1.5s ease-in-out infinite;
 }
 
-/* Circle before "Live" text: green glow + shrink/pulse */
+/* Circle before "Live" text: green glow + shrink/pulse (20% larger base, 20% stronger glow) */
 @keyframes liveGlowShrink {
   0%, 100% {
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.9);
+    box-shadow: 0 0 7px rgba(34, 197, 94, 1), 0 0 14px rgba(34, 197, 94, 0.6);
     transform: scale(1);
     opacity: 1;
   }
   50% {
-    box-shadow: 0 0 14px rgba(34, 197, 94, 0.95);
+    box-shadow: 0 0 17px rgba(34, 197, 94, 1), 0 0 24px rgba(34, 197, 94, 0.7);
     transform: scale(0.85);
     opacity: 0.9;
   }

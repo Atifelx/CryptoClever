@@ -57,6 +57,39 @@ async def bootstrap_symbol_interval(symbol: str, interval: str) -> None:
     logger.info("Bootstrapped %s %s: %d candles", symbol, interval, len(candles))
 
 
+async def fetch_klines_range(
+    symbol: str, interval: str, start_time_sec: int, end_time_sec: int
+) -> list[dict[str, Any]]:
+    """Fetch klines from Binance REST for a time range (inclusive). Returns candles in store format (time in seconds)."""
+    url = f"{BINANCE_REST_BASE}/klines"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "startTime": start_time_sec * 1000,
+        "endTime": end_time_sec * 1000,
+        "limit": 1000,
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, params=params, timeout=10.0)
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        logger.warning("Fetch klines range %s %s [%s..%s] failed: %s", symbol, interval, start_time_sec, end_time_sec, e)
+        return []
+    candles = []
+    for k in data:
+        candles.append({
+            "time": k[0] // 1000,
+            "open": float(k[1]),
+            "high": float(k[2]),
+            "low": float(k[3]),
+            "close": float(k[4]),
+            "volume": float(k[5]),
+        })
+    return candles
+
+
 async def bootstrap_all() -> None:
     """Bootstrap all symbol/interval combinations."""
     tasks = [
