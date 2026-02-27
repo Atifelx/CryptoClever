@@ -67,7 +67,7 @@ export function useBackendCandlesLoader() {
               time: t,
               open: Number.isFinite(o) ? o : 0,
               high: Number.isFinite(h) ? h : 0,
-              low: Number.isFinite(l) ? h : 0,
+              low: Number.isFinite(l) ? l : 0,
               close: Number.isFinite(c) ? c : 0,
               volume: typeof v === 'number' && Number.isFinite(v) ? v : undefined,
             } as Candle;
