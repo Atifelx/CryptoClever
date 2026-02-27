@@ -51,13 +51,16 @@ function normalizeWsMessage(
 /** Backend base URL for REST; fallback when NEXT_PUBLIC_BACKEND_URL is unset. */
 function getBackendBaseUrl(): string {
   const u = process.env.NEXT_PUBLIC_BACKEND_URL;
-  const base = (u && u.trim()) ? u.trim().replace(/\/$/, '') : 'http://localhost:8000';
-  return base;
+  if (u && u.trim()) return u.trim().replace(/\/$/, '');
+  if (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('localhost'))
+    return '';
+  return 'http://localhost:8000';
 }
 
-/** WebSocket base URL (ws or wss) from the same host/port as backend. */
+/** WebSocket base URL (ws or wss) from the same host/port as backend. Empty when backend URL not set in production. */
 function getBackendWsBaseUrl(): string {
   const base = getBackendBaseUrl();
+  if (!base) return '';
   return base.replace(/^https/, 'wss').replace(/^http/, 'ws');
 }
 
@@ -115,7 +118,9 @@ export function useCandles(symbol: string) {
       mergeWithCurrent?: boolean;
     }) => {
       const baseUrl = getBackendBaseUrl();
-      const url = `${baseUrl}/candles/${symbol}/1m?limit=1000`;
+      const url = baseUrl
+        ? `${baseUrl}/candles/${symbol}/1m?limit=1000`
+        : `/api/backend/candles/${symbol}/1m?limit=1000`;
       fetch(url)
         .then((response) => response.json())
         .then(
@@ -150,11 +155,11 @@ export function useCandles(symbol: string) {
     fetchCandles();
 
     const wsBase = getBackendWsBaseUrl();
-    const websocketUrl = `${wsBase}/ws/candles/${symbol}`;
+    const websocketUrl = wsBase ? `${wsBase}/ws/candles/${symbol}` : '';
 
     function connect() {
       if (didUnmount) return;
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+      if (!websocketUrl || wsRef.current?.readyState === WebSocket.OPEN) return;
 
       console.log(
         reconnectAttemptsRef.current === 0
