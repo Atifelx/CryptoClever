@@ -65,9 +65,9 @@ export function useCandlesDebug(symbol: string) {
         console.error(`❌ [useCandlesDebug] REST error for ${symbol}:`, error);
       });
 
-    // WebSocket connection
-    const wsUrl = `ws://localhost:8000/ws/candles/${symbol}`;
-    console.log(`🔍 [useCandlesDebug] Connecting WebSocket: ${wsUrl}`);
+    // WebSocket connection: single endpoint, subscribe to (symbol, 1m)
+    const wsUrl = `ws://localhost:8000/ws/candles`;
+    console.log(`🔍 [useCandlesDebug] Connecting WebSocket: ${wsUrl}, subscribing to ${symbol} 1m`);
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -75,10 +75,26 @@ export function useCandlesDebug(symbol: string) {
     ws.onopen = () => {
       console.log(`✅ [useCandlesDebug] WebSocket connected for ${symbol}`);
       setIsConnected(true);
+      ws.send(JSON.stringify({ symbol, interval: '1m' }));
     };
 
     ws.onmessage = (event) => {
-      const newCandle: Candle = JSON.parse(event.data as string);
+      const data = JSON.parse(event.data as string) as Record<string, unknown>;
+      if (data.type !== 'candle') return;
+      const raw = (data.candle ?? data) as Record<string, unknown>;
+      const t = raw.time ?? raw.timestamp;
+      const ts = typeof t === 'number' ? (t < 1e10 ? t * 1000 : t) : 0;
+      const newCandle: Candle = {
+        symbol: (raw.symbol ?? data.symbol ?? symbol) as string,
+        timestamp: ts,
+        open: Number(raw.open) || 0,
+        high: Number(raw.high) || 0,
+        low: Number(raw.low) || 0,
+        close: Number(raw.close) || 0,
+        volume: Number(raw.volume) || 0,
+        is_closed: raw.is_closed !== false,
+      };
+      if (newCandle.symbol !== symbol) return;
 
       console.log(`📨 [useCandlesDebug] Received for ${symbol}:`, {
         receivedSymbol: newCandle.symbol,

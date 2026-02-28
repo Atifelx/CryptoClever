@@ -6,6 +6,7 @@ from typing import Any, Optional
 import redis.asyncio as aioredis
 
 from app.config import BUFFER_SIZE, REDIS_URL, USE_MEMORY_STORE
+from app.utils import build_candle_key, normalize_interval, normalize_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ else:
 
 
 def _key(symbol: str, interval: str) -> str:
-    return f"candles:{symbol.upper()}:{interval}"
+    return build_candle_key(symbol, interval)
 
 
 async def get_redis() -> aioredis.Redis:
@@ -39,26 +40,36 @@ async def get_redis() -> aioredis.Redis:
 
 async def get_candles(symbol: str, interval: str, limit: int = 500) -> list[dict[str, Any]]:
     """Read candles from Redis; return last `limit` candles. Always returns a copy to avoid shared references."""
+    key = build_candle_key(symbol, interval)
     if USE_MEMORY_STORE:
-        key = _key(symbol, interval)
         data = _memory_store.get(key)
         if data is None:
+            logger.info("[GET_CANDLES] Key='%s' | Symbol='%s' | Interval='%s' | Count=0 | LastClose=EMPTY", key, symbol, interval)
             return []
         if len(data) > limit:
-            return list(data[-limit:])
-        return list(data)
+            result = list(data[-limit:])
+        else:
+            result = list(data)
+        last_close = result[-1].get("close") if result else "EMPTY"
+        logger.info("[GET_CANDLES] Key='%s' | Symbol='%s' | Interval='%s' | Count=%d | LastClose=%s", key, symbol, interval, len(result), last_close)
+        return result
     try:
         r = await get_redis()
-        key = _key(symbol, interval)
         raw = await r.get(key)
         if not raw:
+            logger.info("[GET_CANDLES] Key='%s' | Symbol='%s' | Interval='%s' | Count=0 | LastClose=EMPTY", key, symbol, interval)
             return []
         data = json.loads(raw)
         if not isinstance(data, list):
+            logger.info("[GET_CANDLES] Key='%s' | Symbol='%s' | Interval='%s' | Count=0 | LastClose=EMPTY", key, symbol, interval)
             return []
         if len(data) > limit:
-            return list(data[-limit:])
-        return list(data)
+            result = list(data[-limit:])
+        else:
+            result = list(data)
+        last_close = result[-1].get("close") if result else "EMPTY"
+        logger.info("[GET_CANDLES] Key='%s' | Symbol='%s' | Interval='%s' | Count=%d | LastClose=%s", key, symbol, interval, len(result), last_close)
+        return result
     except Exception as e:
         logger.warning("Redis get_candles error: %s", e)
         return []
@@ -67,8 +78,8 @@ async def get_candles(symbol: str, interval: str, limit: int = 500) -> list[dict
 async def append_candle(symbol: str, interval: str, candle: dict[str, Any]) -> None:
     """Append or update one candle; keep buffer at most BUFFER_SIZE (FIFO)."""
     global _last_append_time
+    key = build_candle_key(symbol, interval)
     if USE_MEMORY_STORE:
-        key = _key(symbol, interval)
         data = _memory_store.get(key)
         if data is None:
             data = []
@@ -127,13 +138,14 @@ async def append_candle(symbol: str, interval: str, candle: dict[str, Any]) -> N
 
 async def set_candles(symbol: str, interval: str, candles: list[dict[str, Any]]) -> None:
     """Replace full buffer (e.g. after bootstrap)."""
+    key = build_candle_key(symbol, interval)
+    last_close = candles[-1].get("close") if candles else "EMPTY"
+    logger.info("[SET_CANDLES] Key='%s' | Symbol='%s' | Interval='%s' | Count=%d | LastClose=%s", key, symbol, interval, len(candles), last_close)
     if USE_MEMORY_STORE:
-        key = _key(symbol, interval)
         _memory_store[key] = candles[-BUFFER_SIZE:] if len(candles) > BUFFER_SIZE else list(candles)
         return
     try:
         r = await get_redis()
-        key = _key(symbol, interval)
         if len(candles) > BUFFER_SIZE:
             candles = candles[-BUFFER_SIZE:]
         await r.set(key, json.dumps(candles))
@@ -152,16 +164,49 @@ SIGNALS_KEY_PREFIX = "indicators:"
 SIGNALS_TTL = 60
 
 
+async def get_store_keys_info() -> dict[str, dict[str, Any]]:
+    """Return for each candles:* key: count, first_time, last_time. Used by /debug/store-keys."""
+    result: dict[str, dict[str, Any]] = {}
+    if USE_MEMORY_STORE:
+        for key in _memory_store:
+            if not key.startswith("candles:"):
+                continue
+            data = _memory_store.get(key) or []
+            result[key] = {
+                "count": len(data),
+                "first_time": data[0].get("time") if data else None,
+                "last_time": data[-1].get("time") if data else None,
+            }
+        return result
+    try:
+        r = await get_redis()
+        keys = await r.keys("candles:*")
+        for key in keys:
+            raw = await r.get(key)
+            data = json.loads(raw) if raw else []
+            if not isinstance(data, list):
+                data = []
+            result[key] = {
+                "count": len(data),
+                "first_time": data[0].get("time") if data else None,
+                "last_time": data[-1].get("time") if data else None,
+            }
+        return result
+    except Exception as e:
+        logger.warning("get_store_keys_info error: %s", e)
+        return {}
+
+
 async def get_signals(symbol: str, interval: str) -> Optional[dict[str, Any]]:
     if USE_MEMORY_STORE:
-        key = f"{SIGNALS_KEY_PREFIX}{symbol.upper()}:{interval}"
+        key = f"{SIGNALS_KEY_PREFIX}{normalize_symbol(symbol)}:{normalize_interval(interval)}"
         entry = _memory_signals.get(key)
         if entry and entry[1] > time.time():
             return entry[0]
         return None
     try:
         r = await get_redis()
-        key = f"{SIGNALS_KEY_PREFIX}{symbol.upper()}:{interval}"
+        key = f"{SIGNALS_KEY_PREFIX}{normalize_symbol(symbol)}:{normalize_interval(interval)}"
         raw = await r.get(key)
         if not raw:
             return None
@@ -173,12 +218,12 @@ async def get_signals(symbol: str, interval: str) -> Optional[dict[str, Any]]:
 
 async def set_signals(symbol: str, interval: str, data: dict[str, Any]) -> None:
     if USE_MEMORY_STORE:
-        key = f"{SIGNALS_KEY_PREFIX}{symbol.upper()}:{interval}"
+        key = f"{SIGNALS_KEY_PREFIX}{normalize_symbol(symbol)}:{normalize_interval(interval)}"
         _memory_signals[key] = (data, time.time() + SIGNALS_TTL)
         return
     try:
         r = await get_redis()
-        key = f"{SIGNALS_KEY_PREFIX}{symbol.upper()}:{interval}"
+        key = f"{SIGNALS_KEY_PREFIX}{normalize_symbol(symbol)}:{normalize_interval(interval)}"
         await r.setex(key, SIGNALS_TTL, json.dumps(data))
     except Exception as e:
         logger.warning("Redis set_signals error: %s", e)

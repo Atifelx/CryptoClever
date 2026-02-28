@@ -379,13 +379,18 @@ export default function TradingChart({
     }
   }, [symbol, interval]);
 
-  // Update chart data when candles change (from Zustand store; candles are always for current symbol/interval).
+  // Update chart data when candles change (from useCandles; candles are for current symbol after clear on symbol change).
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
     if (candles.length === 0) {
       setLoading(isLoading);
       prevCandlesLenRef.current = 0;
       return;
+    }
+
+    if (process.env.NODE_ENV === 'development' && candles.length > 0) {
+      const lastCloses = candles.slice(-5).map((c) => c.close);
+      console.log('📊 [TradingChart] Chart data update:', { symbol, candleCount: candles.length, lastCloses });
     }
 
     setLoading(false);

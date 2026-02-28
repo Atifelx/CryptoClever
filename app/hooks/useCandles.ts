@@ -21,14 +21,15 @@ const ONE_INTERVAL_MS = 60 * 1000;
 
 /**
  * Normalize WebSocket message to a single Candle with timestamp in ms.
- * Supports: (1) flat object with timestamp (ms, from /ws/candles/{symbol}),
- *          (2) nested { type, symbol, interval, candle } with candle.time in seconds.
+ * Supports: (1) proposal API live_candle: flat { type, symbol, time (ms), open, high, low, close, volume, is_closed }
+ *          (2) legacy nested { type, symbol, interval, candle } with candle.time in seconds (single feed /ws/candles).
  */
 function normalizeWsMessage(
   data: Record<string, unknown>,
   symbol: string
 ): Candle {
-  const raw = (data.candle ?? data) as Record<string, unknown>;
+  const isProposalLive = data.type === 'live_candle';
+  const raw = isProposalLive ? data : (data.candle ?? data) as Record<string, unknown>;
   const t = raw.time ?? raw.timestamp;
   const ts =
     typeof t === 'number'
@@ -68,19 +69,25 @@ function normalizeCandles(
   rawCandles: Array<Record<string, unknown>>,
   symbol: string
 ): Candle[] {
-  return rawCandles.map((c) => ({
-    symbol,
-    timestamp:
-      typeof (c as { time?: number }).time === 'number'
-        ? (c as { time: number }).time * 1000
-        : ((c as { timestamp?: number }).timestamp ?? 0),
-    open: Number((c as { open?: number }).open) || 0,
-    high: Number((c as { high?: number }).high) || 0,
-    low: Number((c as { low?: number }).low) || 0,
-    close: Number((c as { close?: number }).close) || 0,
-    volume: Number((c as { volume?: number }).volume) || 0,
-    is_closed: true,
-  }));
+  return rawCandles.map((c) => {
+    const t = (c as { time?: number; timestamp?: number }).time ?? (c as { timestamp?: number }).timestamp;
+    const ts =
+      typeof t === 'number'
+        ? t < 1e10
+          ? t * 1000
+          : t
+        : 0;
+    return {
+      symbol,
+      timestamp: ts,
+      open: Number((c as { open?: number }).open) || 0,
+      high: Number((c as { high?: number }).high) || 0,
+      low: Number((c as { low?: number }).low) || 0,
+      close: Number((c as { close?: number }).close) || 0,
+      volume: Number((c as { volume?: number }).volume) || 0,
+      is_closed: (c as { is_closed?: boolean }).is_closed !== false,
+    };
+  });
 }
 
 /**
@@ -119,18 +126,33 @@ export function useCandles(symbol: string) {
     }) => {
       const baseUrl = getBackendBaseUrl();
       const url = baseUrl
-        ? `${baseUrl}/candles/${symbol}/1m?limit=1000`
+        ? `${baseUrl}/api/historical/${encodeURIComponent(symbol)}?interval=1m&hours=12`
         : `/api/backend/candles/${symbol}/1m?limit=1000`;
+      console.log('🟢 [useCandles] Fetching URL:', url, 'for symbol:', symbol);
       fetch(url)
         .then((response) => response.json())
         .then(
           (data: {
             symbol?: string;
             interval?: string;
+            hours?: number;
+            count?: number;
+            data?: Array<Record<string, unknown>>;
             candles?: Array<Record<string, unknown>>;
           }) => {
-            const rawCandles = Array.isArray(data.candles) ? data.candles : [];
-            const normalized = normalizeCandles(rawCandles, symbol);
+            const rawCandles = Array.isArray(data.data)
+              ? data.data
+              : Array.isArray(data.candles)
+                ? data.candles
+                : [];
+            const resSymbol = ((data.symbol ?? symbol) as string).toUpperCase();
+            const reqSymbol = symbol.toUpperCase();
+            if (resSymbol !== reqSymbol) {
+              console.error('🔴 [useCandles] Symbol mismatch: requested', symbol, 'got', resSymbol, '- ignoring response');
+              return;
+            }
+            console.log('🟡 [useCandles] Received data for symbol:', resSymbol, 'candles:', rawCandles.length);
+            const normalized = normalizeCandles(rawCandles, reqSymbol);
             if (!options?.mergeWithCurrent) {
               setCandles(normalized);
             }
@@ -148,14 +170,12 @@ export function useCandles(symbol: string) {
     let didUnmount = false;
     reconnectAttemptsRef.current = 0;
 
-    console.log(`Setting up connection for ${symbol}`);
+    console.log('🔵 [useCandles] useEffect triggered for symbol:', symbol);
     setCandles([]);
 
-    // Initial REST load
-    fetchCandles();
-
     const wsBase = getBackendWsBaseUrl();
-    const websocketUrl = wsBase ? `${wsBase}/ws/candles/${symbol}` : '';
+    const normSymbol = symbol.toUpperCase();
+    const websocketUrl = wsBase ? `${wsBase}/ws/${encodeURIComponent(normSymbol)}` : '';
 
     function connect() {
       if (didUnmount) return;
@@ -163,7 +183,7 @@ export function useCandles(symbol: string) {
 
       console.log(
         reconnectAttemptsRef.current === 0
-          ? `Connecting to backend WebSocket: ${websocketUrl}`
+          ? `Connecting to backend WebSocket: ${websocketUrl} (proposal API: historical + live_candle)`
           : `Reconnecting (attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS})...`
       );
 
@@ -174,10 +194,10 @@ export function useCandles(symbol: string) {
       ws.onopen = () => {
         if (didUnmount) return;
         reconnectAttemptsRef.current = 0;
-        console.log(`✅ Connected to backend for ${symbol}`);
+        console.log(`✅ Connected to backend for ${normSymbol}`);
         setIsConnected(true);
+        // Proposal API: server sends historical first, then live_candle; no subscription message needed.
 
-        // Option B: after reconnect, re-fetch last 1000 to align with backend
         if (isReconnect) {
           fetchCandles();
         }
@@ -191,37 +211,52 @@ export function useCandles(symbol: string) {
         } catch {
           return;
         }
-        const newCandle = normalizeWsMessage(data, symbol);
 
-        setCandles((previousCandles) => {
-          const updatedCandles = [...previousCandles];
+        if (data.type === 'error') {
+          console.error('[useCandles] Server error:', (data as { message?: string }).message);
+          return;
+        }
 
-          if (updatedCandles.length > 0) {
-            const lastCandle = updatedCandles[updatedCandles.length - 1];
+        if (data.type === 'historical') {
+          const rawCandles = Array.isArray(data.data) ? data.data : [];
+          const normalized = normalizeCandles(rawCandles, normSymbol);
+          setCandles(normalized);
+          return;
+        }
 
-            if (lastCandle.timestamp === newCandle.timestamp) {
-              updatedCandles[updatedCandles.length - 1] = newCandle;
-              return updatedCandles;
+        if (data.type === 'live_candle') {
+          const newCandle = normalizeWsMessage(data, normSymbol);
+
+          setCandles((previousCandles) => {
+            const updatedCandles = [...previousCandles];
+
+            if (updatedCandles.length > 0) {
+              const lastCandle = updatedCandles[updatedCandles.length - 1];
+
+              if (lastCandle.timestamp === newCandle.timestamp) {
+                updatedCandles[updatedCandles.length - 1] = newCandle;
+                return updatedCandles;
+              }
+
+              if (newCandle.timestamp - lastCandle.timestamp > ONE_INTERVAL_MS) {
+                fetchCandles({
+                  mergeWithCurrent: true,
+                  onSuccess: (normalized) => {
+                    setCandles((prev) => mergeRefetchedWithCurrent(normalized, prev));
+                  },
+                });
+              }
+
+              updatedCandles.push(newCandle);
+              if (updatedCandles.length > 1000) updatedCandles.shift();
+            } else {
+              updatedCandles.push(newCandle);
             }
 
-            // On forward gap: refetch to fill missing candles (REST has them); merge with current so we keep live WS candles
-            if (newCandle.timestamp - lastCandle.timestamp > ONE_INTERVAL_MS) {
-              fetchCandles({
-                mergeWithCurrent: true,
-                onSuccess: (normalized) => {
-                  setCandles((prev) => mergeRefetchedWithCurrent(normalized, prev));
-                },
-              });
-            }
-
-            updatedCandles.push(newCandle);
-            if (updatedCandles.length > 1000) updatedCandles.shift();
-          } else {
-            updatedCandles.push(newCandle);
-          }
-
-          return updatedCandles;
-        });
+            return updatedCandles;
+          });
+          return;
+        }
       };
 
       ws.onerror = (error) => {

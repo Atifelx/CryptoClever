@@ -10,8 +10,8 @@ SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
 ]
 
-# Only 1m interval for live stream and REST (1000 candles)
-INTERVALS = ["1m"]
+# Multiple intervals for live stream and REST (TradingView-style). Binance supports: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w
+INTERVALS = ["1m", "5m", "15m", "1h", "1d"]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # Set to "1" or "true" to use in-memory store instead of Redis (no Redis needed for local testing)

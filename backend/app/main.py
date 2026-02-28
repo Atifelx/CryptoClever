@@ -2,16 +2,17 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Optional
 
-import websockets
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
-from app.binance_ws import bootstrap_all, bootstrap_symbol_interval, fetch_klines_range, run_binance_ws
+from app.binance_ws import bootstrap_all, get_stream_status, run_binance_ws
 from app.config import INTERVALS, SYMBOLS
-from app.redis_store import get_candles, get_signals, set_signals, close_redis, get_last_append_time, append_candle
+from app.redis_store import get_candles, get_signals, set_signals, close_redis, get_last_append_time, append_candle, get_store_keys_info
+from app.utils import build_candle_key, normalize_interval, normalize_symbol
 from app.indicators import compute_signals
 from app import database as db
 from app import ws_broadcast as ws_broadcast
@@ -61,10 +62,136 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/store-keys")
+async def debug_store_keys():
+    """Debug: list candle store keys with count, first_time, last_time. Verify 5 keys (one per symbol) with uppercase symbols."""
+    return await get_store_keys_info()
+
+
+@app.get("/debug/verify-unique-data")
+async def debug_verify_unique_data():
+    """Check if each symbol has unique data (bug = all same last_close)."""
+    results = {}
+    for symbol in SYMBOLS:
+        candles = await get_candles(symbol, "1m", 5)
+        results[symbol] = {
+            "count": len(candles),
+            "last_close": candles[-1].get("close") if candles else None,
+            "last_time": candles[-1].get("time") if candles else None,
+        }
+    close_prices = [v["last_close"] for v in results.values() if v["last_close"] is not None]
+    all_same = len(close_prices) > 1 and len(set(close_prices)) == 1
+    return {
+        "symbols": results,
+        "bug_detected": all_same,
+        "message": "BUG: All symbols have same close price!" if all_same else "OK: Symbols have different data",
+    }
+
+
+@app.get("/debug/candle-details/{symbol}/{interval}")
+async def debug_candle_details(symbol: str, interval: str, limit: int = 5):
+    """Show last N candles for a symbol to verify they're different per symbol."""
+    symbol = normalize_symbol(symbol)
+    interval = normalize_interval(interval)
+    candles = await get_candles(symbol, interval, limit=limit)
+    return {
+        "symbol": symbol,
+        "interval": interval,
+        "key": build_candle_key(symbol, interval),
+        "count": len(candles),
+        "candles": candles,
+        "close_prices": [c.get("close") for c in candles],
+    }
+
+
+@app.get("/debug/binance-pipeline")
+async def debug_binance_pipeline():
+    """Debug: store candles (REST bootstrap + stream appends) and Binance WebSocket stream status with recent candles. Use to verify backend/Binance pipeline before frontend."""
+    keys_info = await get_store_keys_info()
+    store_candles = []
+    for symbol in SYMBOLS:
+        for interval in INTERVALS:
+            key = build_candle_key(symbol, interval)
+            info = keys_info.get(key, {})
+            count = info.get("count", 0)
+            first_time = info.get("first_time")
+            last_time = info.get("last_time")
+            last_candle = None
+            if count > 0:
+                candles = await get_candles(symbol, interval, limit=1)
+                if candles:
+                    last_candle = candles[-1]
+            store_candles.append({
+                "symbol": symbol,
+                "interval": interval,
+                "count": count,
+                "first_time": first_time,
+                "last_time": last_time,
+                "last_candle": last_candle,
+            })
+    stream = get_stream_status()
+    return {
+        "store_candles": store_candles,
+        "stream": stream,
+    }
+
+
+@app.get("/debug/binance-pipeline/page", response_class=HTMLResponse)
+async def debug_binance_pipeline_page():
+    """Browser page: view store candles and Binance stream status with auto-refresh. Use to verify backend/Binance pipeline."""
+    return BINANCE_PIPELINE_PAGE_HTML
+
+
 @app.get("/symbols")
 async def symbols():
     """Return list of symbols the backend streams (for frontend to show only these)."""
     return {"symbols": list(SYMBOLS)}
+
+
+@app.get("/api/symbols")
+async def api_symbols():
+    """Proposal API: symbols list with count."""
+    return {"symbols": list(SYMBOLS), "count": len(SYMBOLS)}
+
+
+_CHART_DEMO_PATH = Path(__file__).resolve().parent.parent / "static" / "chart_demo.html"
+
+
+@app.get("/chart_demo", response_class=HTMLResponse)
+async def chart_demo():
+    """Proposal API demo: TradingView Lightweight Charts with WS /ws/{symbol} (historical + live_candle)."""
+    if _CHART_DEMO_PATH.is_file():
+        return FileResponse(_CHART_DEMO_PATH, media_type="text/html")
+    return HTMLResponse("<p>chart_demo.html not found</p>", status_code=404)
+
+
+# Interval to seconds for historical limit calculation
+_HISTORICAL_INTERVAL_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400, "6h": 21600, "8h": 28800, "12h": 43200, "1d": 86400, "3d": 259200, "1w": 604800}
+
+
+@app.get("/api/historical/{symbol}")
+async def api_historical(symbol: str, interval: str = "1m", hours: int = 12):
+    """Proposal API: historical candles (time in ms, is_closed true). Uses store; interval and hours determine limit."""
+    symbol = normalize_symbol(symbol)
+    interval = normalize_interval(interval)
+    if symbol not in SYMBOLS:
+        raise HTTPException(status_code=404, detail=f"Symbol {symbol} not supported")
+    interval_sec = _HISTORICAL_INTERVAL_SECONDS.get(interval, 60)
+    limit = min(1000, max(1, int(hours * 3600 / interval_sec)))
+    candles = await get_candles(symbol, interval, limit=limit)
+    data = [
+        {
+            "time": c["time"] * 1000,
+            "open": c["open"],
+            "high": c["high"],
+            "low": c["low"],
+            "close": c["close"],
+            "volume": c.get("volume", 0),
+            "is_closed": True,
+        }
+        for c in candles
+    ]
+    return {"symbol": symbol, "interval": interval, "hours": hours, "count": len(data), "data": data}
 
 
 @app.get("/streaming/status")
@@ -386,6 +513,99 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
 """
 
 
+BINANCE_PIPELINE_PAGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Debug: Binance pipeline (REST + stream)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 16px; }
+    h1 { margin: 0 0 8px 0; font-size: 1.25rem; }
+    h2 { font-size: 1rem; color: #26a69a; margin: 20px 0 8px 0; }
+    .sub { color: #888; font-size: 0.875rem; margin-bottom: 12px; }
+    .status-box { padding: 10px 14px; margin-bottom: 12px; border-radius: 8px; font-size: 0.9rem; }
+    .status-box.ok { background: #1b2e1b; color: #4caf50; border: 1px solid #2e5c2e; }
+    .status-box.err { background: #2e1b1b; color: #f44336; border: 1px solid #5c2e2e; }
+    table { border-collapse: collapse; width: 100%; max-width: 960px; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; }
+    th { color: #26a69a; position: sticky; top: 0; background: #0f0f0f; }
+    .count { font-variant-numeric: tabular-nums; }
+    .time { font-variant-numeric: tabular-nums; color: #aaa; }
+    #storeTable tbody tr:hover { background: #1a1a1a; }
+    #streamTable tbody tr:hover { background: #1a1a1a; }
+  </style>
+</head>
+<body>
+  <h1>Debug: Binance pipeline</h1>
+  <p class="sub">Store candles (REST bootstrap + stream appends) and Binance WebSocket stream status. Auto-refreshes every 3s. Use to verify backend/Binance before frontend.</p>
+  <p class="sub">Last fetch: <span id="lastFetch">—</span></p>
+  <div id="statusBox" class="status-box err">Loading…</div>
+  <h2>Store candles (source of GET /candles)</h2>
+  <table id="storeTable">
+    <thead>
+      <tr><th>Symbol</th><th>Interval</th><th>Count</th><th>First time</th><th>Last time</th><th>Last open</th><th>Last high</th><th>Last low</th><th>Last close</th><th>Last vol</th></tr>
+    </thead>
+    <tbody id="storeBody"></tbody>
+  </table>
+  <h2>Binance stream</h2>
+  <p class="sub">Connected: <span id="streamConnected">—</span> · Last received at: <span id="lastReceived">—</span></p>
+  <table id="streamTable">
+    <thead>
+      <tr><th>Received at</th><th>Symbol</th><th>Interval</th><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Vol</th></tr>
+    </thead>
+    <tbody id="streamBody"></tbody>
+  </table>
+  <script>
+    const apiBase = (document.location.pathname || '').indexOf('/api/backend') !== -1 ? '/api/backend' : '';
+    const pipelineUrl = apiBase + '/debug/binance-pipeline';
+    function formatTime(ts) {
+      if (ts == null) return '—';
+      if (ts < 1e10) ts *= 1000;
+      return new Date(ts).toLocaleString();
+    }
+    async function refresh() {
+      try {
+        const r = await fetch(pipelineUrl);
+        const data = await r.json();
+        document.getElementById('lastFetch').textContent = new Date().toLocaleTimeString();
+        if (!r.ok) {
+          document.getElementById('statusBox').className = 'status-box err';
+          document.getElementById('statusBox').textContent = 'HTTP ' + r.status + (data.detail ? ': ' + JSON.stringify(data.detail) : '');
+          return;
+        }
+        document.getElementById('statusBox').className = 'status-box ok';
+        document.getElementById('statusBox').textContent = 'Pipeline data loaded.';
+        const store = data.store_candles || [];
+        const storeRows = store.map(function(row) {
+          const c = row.last_candle || {};
+          return '<tr><td>' + row.symbol + '</td><td>' + row.interval + '</td><td class="count">' + row.count + '</td><td class="time">' + formatTime(row.first_time) + '</td><td class="time">' + formatTime(row.last_time) + '</td><td class="count">' + (c.open != null ? c.open : '—') + '</td><td class="count">' + (c.high != null ? c.high : '—') + '</td><td class="count">' + (c.low != null ? c.low : '—') + '</td><td class="count">' + (c.close != null ? c.close : '—') + '</td><td class="count">' + (c.volume != null ? Number(c.volume).toFixed(0) : '—') + '</td></tr>';
+        });
+        document.getElementById('storeBody').innerHTML = storeRows.length ? storeRows.join('') : '<tr><td colspan="10">No store data</td></tr>';
+        const stream = data.stream || {};
+        document.getElementById('streamConnected').textContent = stream.connected ? 'Yes' : 'No';
+        document.getElementById('streamConnected').style.color = stream.connected ? '#4caf50' : '#f44336';
+        document.getElementById('lastReceived').textContent = stream.last_received_at ? formatTime(stream.last_received_at) : '—';
+        const recent = stream.recent_candles || [];
+        const streamRows = recent.map(function(entry) {
+          const c = entry.candle || {};
+          return '<tr><td class="time">' + formatTime(entry.received_at) + '</td><td>' + (entry.symbol || '—') + '</td><td>' + (entry.interval || '—') + '</td><td class="time">' + formatTime(entry.time) + '</td><td class="count">' + (c.open != null ? c.open : '—') + '</td><td class="count">' + (c.high != null ? c.high : '—') + '</td><td class="count">' + (c.low != null ? c.low : '—') + '</td><td class="count">' + (c.close != null ? c.close : '—') + '</td><td class="count">' + (c.volume != null ? Number(c.volume).toFixed(0) : '—') + '</td></tr>';
+        });
+        document.getElementById('streamBody').innerHTML = streamRows.length ? streamRows.join('') : '<tr><td colspan="9">No recent stream candles yet (wait for Binance to send)</td></tr>';
+      } catch (e) {
+        document.getElementById('statusBox').className = 'status-box err';
+        document.getElementById('statusBox').textContent = 'Failed: ' + (e.message || String(e));
+      }
+    }
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
+"""
+
+
 @app.get("/inspect", response_class=HTMLResponse)
 async def inspect_candles():
     """Browser page: see every symbol × interval candle count (target 1000) and last candle time; auto-refreshes so you can see new candles updating."""
@@ -594,221 +814,63 @@ async def verify_live():
     return HTMLResponse(html)
 
 
-class ConnectionManager:
-    def __init__(self):
-        # Track Next.js client connections
-        # Format: {"BTCUSDT": [websocket1, websocket2], "ETHUSDT": [websocket3]}
-        self.active_connections: Dict[str, List[WebSocket]] = {}
-
-        # Track Binance WebSocket connections (tasks)
-        # Format: {"BTCUSDT": task1, "ETHUSDT": task2}
-        self.binance_connections: Dict[str, asyncio.Task] = {}
-
-        # Store the latest candle for each symbol
-        # Format: {"BTCUSDT": {candle_data}, "ETHUSDT": {candle_data}}
-        self.latest_candles: Dict[str, dict] = {}
-
-    async def connect_client(self, websocket: WebSocket, symbol: str):
-        """Called when a Next.js client connects"""
-        # Accept the WebSocket connection
-        await websocket.accept()
-
-        # Add this symbol to the dictionary if it doesn't exist
-        if symbol not in self.active_connections:
-            self.active_connections[symbol] = []
-
-        # Add this client's WebSocket to the list for this symbol
-        self.active_connections[symbol].append(websocket)
-
-        # Print how many clients are watching this symbol
-        client_count = len(self.active_connections[symbol])
-        logger.info("✅ Client connected to %s. Total clients watching %s: %s", symbol, symbol, client_count)
-
-        # If this is the first client for this symbol, start Binance connection
-        if client_count == 1:
-            await self.start_binance_stream(symbol)
-
-        # Send the latest candle to this new client (if we have one cached)
-        if symbol in self.latest_candles:
-            await websocket.send_json(self.latest_candles[symbol])
-
-    async def disconnect_client(self, websocket: WebSocket, symbol: str):
-        """Called when a Next.js client disconnects"""
-        # Remove this client from the list
-        if symbol in self.active_connections:
-            try:
-                self.active_connections[symbol].remove(websocket)
-            except ValueError:
-                # Already removed / never added (race or double-cleanup)
-                return
-
-            # Print how many clients are still watching
-            remaining = len(self.active_connections[symbol])
-            logger.info("❌ Client disconnected from %s. Remaining clients: %s", symbol, remaining)
-
-            # If no more clients are watching this symbol, stop Binance connection
-            if remaining == 0:
-                await self.stop_binance_stream(symbol)
-                self.active_connections.pop(symbol, None)
-
-    async def broadcast_to_clients(self, symbol: str, candle_data: dict):
-        """Send candle data to all Next.js clients watching this symbol"""
-        # Save the latest candle
-        self.latest_candles[symbol] = candle_data
-
-        # Get all clients watching this symbol
-        if symbol in self.active_connections:
-            clients = self.active_connections[symbol]
-            logger.info("📢 Broadcasting to %s clients watching %s", len(clients), symbol)
-
-            # Send to each client
-            disconnected_clients = []
-            for client_websocket in clients:
-                try:
-                    await client_websocket.send_json(candle_data)
-                except Exception:
-                    # If sending fails, mark this client for removal
-                    disconnected_clients.append(client_websocket)
-
-            # Remove any disconnected clients
-            for client in disconnected_clients:
-                await self.disconnect_client(client, symbol)
-
-    async def start_binance_stream(self, symbol: str):
-        """
-        Start a WebSocket connection to Binance for this symbol.
-        This is called when the FIRST client connects to a symbol.
-        """
-        logger.info("🚀 Starting Binance WebSocket for %s", symbol)
-
-        # Create a background task that runs the Binance connection
-        task = asyncio.create_task(self._binance_websocket_worker(symbol))
-
-        # Store the task so we can cancel it later
-        self.binance_connections[symbol] = task
-
-    async def stop_binance_stream(self, symbol: str):
-        """
-        Stop the Binance WebSocket connection for this symbol.
-        This is called when the LAST client disconnects from a symbol.
-        """
-        if symbol in self.binance_connections:
-            logger.info("🛑 Stopping Binance WebSocket for %s", symbol)
-
-            # Cancel the background task
-            self.binance_connections[symbol].cancel()
-
-            # Remove from dictionary
-            del self.binance_connections[symbol]
-
-    async def _binance_websocket_worker(self, symbol: str):
-        """
-        This runs in the background and maintains connection to Binance.
-        It receives candle data and broadcasts to all Next.js clients.
-        """
-        # Binance WebSocket URL for this symbol
-        # Example: wss://stream.binance.com:9443/ws/btcusdt@kline_1m
-        url = f"wss://stream.binance.com:9443/ws/{symbol.lower()}@kline_1m"
-
-        logger.info("📡 Connecting to Binance: %s", url)
-
-        # Keep trying to connect (reconnect if connection drops)
+@app.websocket("/ws/{symbol}")
+async def websocket_proposal(websocket: WebSocket, symbol: str):
+    """
+    Proposal API: on connect send historical (type 'historical') then stream live_candle.
+    Client receives one 'historical' message with data array (time ms, is_closed true), then 'live_candle' messages.
+    """
+    symbol = normalize_symbol(symbol)
+    await websocket.accept()
+    if symbol not in SYMBOLS:
+        await websocket.send_json({"type": "error", "message": f"Symbol {symbol} not supported"})
+        await websocket.close(code=4000)
+        return
+    try:
+        candles = await get_candles(symbol, "1m", limit=720)
+        data = [
+            {
+                "time": c["time"] * 1000,
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "volume": c.get("volume", 0),
+                "is_closed": True,
+            }
+            for c in candles
+        ]
+        await websocket.send_json({"type": "historical", "symbol": symbol, "data": data})
+        await ws_broadcast.subscribe_proposal(websocket, symbol, "1m")
+        logger.info("Proposal WS client connected to /ws/%s, sent %d historical candles", symbol, len(data))
         while True:
-            try:
-                # Connect to Binance
-                async with websockets.connect(url) as binance_ws:
-                    logger.info("✅ Connected to Binance for %s", symbol)
-
-                    # Listen for messages from Binance
-                    async for message in binance_ws:
-                        # Parse the JSON message from Binance
-                        data = json.loads(message)
-
-                        # Extract candle information from Binance format
-                        # Binance sends data in 'k' key
-                        kline = data["k"]
-
-                        # Format candle data for our clients
-                        candle = {
-                            "symbol": symbol,
-                            "timestamp": kline["t"],  # Start time
-                            "open": float(kline["o"]),
-                            "high": float(kline["h"]),
-                            "low": float(kline["l"]),
-                            "close": float(kline["c"]),
-                            "volume": float(kline["v"]),
-                            "is_closed": kline["x"],  # Is this candle closed?
-                        }
-
-                        # Sync store before broadcast: ensure no gap (bootstrap if empty, fill gap from REST)
-                        try:
-                            interval = "1m"
-                            data = await get_candles(symbol, interval, limit=1000)
-                            if not data:
-                                await bootstrap_symbol_interval(symbol, interval)
-                                data = await get_candles(symbol, interval, limit=1000)
-                            if data:
-                                last_ts = int(data[-1].get("time", 0))
-                                new_ts = int(candle["timestamp"] // 1000)
-                                if new_ts > last_ts + 60:
-                                    start_sec = last_ts + 60
-                                    end_sec = new_ts - 60
-                                    if end_sec >= start_sec:
-                                        gap_candles = await fetch_klines_range(symbol, interval, start_sec, end_sec)
-                                        for c in gap_candles:
-                                            await append_candle(symbol, interval, c)
-                            store_candle = {
-                                "time": int(candle["timestamp"] // 1000),
-                                "open": candle["open"],
-                                "high": candle["high"],
-                                "low": candle["low"],
-                                "close": candle["close"],
-                                "volume": candle["volume"],
-                            }
-                            await append_candle(symbol, interval, store_candle)
-                        except Exception as sync_err:
-                            logger.warning("Sync-before-broadcast for %s failed (broadcasting anyway): %s", symbol, sync_err)
-
-                        # Broadcast this candle to all Next.js clients watching this symbol
-                        await self.broadcast_to_clients(symbol, candle)
-
-            except asyncio.CancelledError:
-                # This task was cancelled (we stopped it on purpose)
-                logger.info("Binance stream cancelled for %s", symbol)
-                break
-
-            except Exception as e:
-                # Connection error - wait and try again
-                logger.warning("⚠️ Binance connection error for %s: %s", symbol, e)
-                logger.info("Reconnecting in 5 seconds...")
-                await asyncio.sleep(5)
-
-
-# Create a single global instance of the manager
-manager = ConnectionManager()
+            await websocket.receive_text()
+    except Exception:
+        pass
+    finally:
+        await ws_broadcast.unsubscribe_proposal_all(websocket)
+        logger.info("Proposal WS client disconnected from /ws/%s", symbol)
 
 
 @app.websocket("/ws/candles/{symbol}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str):
     """
-    This is where Next.js clients connect.
-    Each client gets their own WebSocket connection to this endpoint.
+    Single feed: subscribe this client to (symbol, 1m) via ws_broadcast. No per-symbol Binance connection.
+    Live data comes from run_binance_ws and is broadcast to all subscribers. Kept for backward compatibility.
+    Prefer /ws/candles with subscription payload for new clients.
     """
-    # Convert symbol to uppercase for consistency
-    symbol = symbol.upper()
-
-    # Use the manager to handle this connection
-    await manager.connect_client(websocket, symbol)
-
+    symbol = normalize_symbol(symbol)
+    await websocket.accept()
+    await ws_broadcast.subscribe(websocket, symbol, "1m")
+    logger.info("Client connected to /ws/candles/%s (shared feed)", symbol)
     try:
         while True:
-            # Keep the connection alive by reading from the client.
-            # Client may never send application messages; close frames still arrive here.
             await websocket.receive_text()
-    except (WebSocketDisconnect, asyncio.CancelledError):
+    except Exception:
         pass
     finally:
-        await manager.disconnect_client(websocket, symbol)
+        await ws_broadcast.unsubscribe_all(websocket)
+        logger.info("Client disconnected from /ws/candles/%s", symbol)
 
 
 @app.websocket("/ws/candles")
@@ -848,14 +910,26 @@ async def websocket_candles(websocket: WebSocket):
 @app.get("/candles/{symbol}/{interval}")
 async def candles(symbol: str, interval: str, limit: int = 500):
     """Return last `limit` candles for symbol/interval from Redis. Single source of truth; Binance WS keeps this updated."""
+    import sys
+    print(f"\n{'='*80}", file=sys.stderr)
+    print(f"[FRONTEND_REQUEST] Raw symbol from URL path: '{symbol}'", file=sys.stderr)
+    print(f"[FRONTEND_REQUEST] Raw interval from URL path: '{interval}'", file=sys.stderr)
+    print(f"[FRONTEND_REQUEST] Limit: {limit}", file=sys.stderr)
     if limit < 1 or limit > 1000:
         limit = 500
-    interval = interval.lower() if interval.upper() != "1D" else "1d"
-    symbol = symbol.upper()
-    data = await get_candles(symbol, interval, limit=limit)
-    last_close = data[-1].get("close") if data else None
-    logger.info("GET /candles symbol=%s interval=%s count=%d last_close=%s", symbol, interval, len(data), last_close)
-    return {"symbol": symbol, "interval": interval, "candles": data if data else []}
+    symbol_normalized = normalize_symbol(symbol)
+    interval_normalized = normalize_interval(interval)
+    print(f"[NORMALIZED] Symbol: '{symbol_normalized}' | Interval: '{interval_normalized}'", file=sys.stderr)
+    key = build_candle_key(symbol_normalized, interval_normalized)
+    print(f"[KEY] Store key: '{key}'", file=sys.stderr)
+    data = await get_candles(symbol_normalized, interval_normalized, limit=limit)
+    print(f"[RESULT] Retrieved {len(data)} candles", file=sys.stderr)
+    if data:
+        print(f"[RESULT] Last 3 closes: {[c.get('close') for c in data[-3:]]}", file=sys.stderr)
+    else:
+        print(f"[RESULT] No candles", file=sys.stderr)
+    print(f"{'='*80}\n", file=sys.stderr)
+    return {"symbol": symbol_normalized, "interval": interval_normalized, "candles": data if data else []}
 
 
 @app.get("/signals/{symbol}/{interval}")

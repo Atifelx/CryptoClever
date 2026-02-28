@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Binance Chart API – Demo</title>
+  <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    .header { padding: 12px 16px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid #333; }
+    .header h1 { margin: 0; font-size: 1.25rem; }
+    .symbol-select { padding: 6px 10px; font-size: 1rem; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 6px; }
+    .status { display: flex; align-items: center; gap: 6px; font-size: 0.875rem; color: #888; }
+    .status.live { color: #4caf50; }
+    .status.disconnected { color: #f44336; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .status.live .status-dot { animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+    #chart-container { width: 100%; height: calc(100vh - 56px); min-height: 400px; }
+    .last-update { font-size: 0.75rem; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Binance Chart API – Demo</h1>
+    <select id="symbolSelect" class="symbol-select" aria-label="Symbol"></select>
+    <div id="status" class="status disconnected">
+      <span class="status-dot"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+    <div class="last-update">Last update: <span id="lastUpdate">—</span></div>
+  </div>
+  <div id="chart-container"></div>
+
+  <script>
+    (function() {
+      const API_BASE = window.location.origin;
+      const WS_BASE = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
+
+      const symbolSelect = document.getElementById('symbolSelect');
+      const statusEl = document.getElementById('status');
+      const statusText = document.getElementById('statusText');
+      const lastUpdateEl = document.getElementById('lastUpdate');
+      const chartContainer = document.getElementById('chart-container');
+
+      let chart = null;
+      let candleSeries = null;
+      let ws = null;
+      let currentSymbol = '';
+
+      function setStatus(connected, text) {
+        statusEl.className = 'status ' + (connected ? 'live' : 'disconnected');
+        statusText.textContent = text || (connected ? 'Live' : 'Disconnected');
+      }
+
+      function setLastUpdate(msg) {
+        lastUpdateEl.textContent = msg;
+      }
+
+      function initChart() {
+        if (chart) {
+          chart.remove();
+          chart = null;
+          candleSeries = null;
+        }
+        chart = LightweightCharts.createChart(chartContainer, {
+          layout: { background: { type: 'solid', color: '#131722' }, textColor: '#d1d4dc' },
+          grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
+          width: chartContainer.clientWidth,
+          height: chartContainer.clientHeight,
+          timeScale: { timeVisible: true, secondsVisible: false },
+        });
+        candleSeries = chart.addCandlestickSeries({
+          upColor: '#26a69a',
+          downColor: '#ef5350',
+          borderVisible: false,
+          wickUpColor: '#26a69a',
+          wickDownColor: '#ef5350',
+        });
+        chart.timeScale().fitContent();
+        window.addEventListener('resize', function() {
+          if (chart && chartContainer) chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight });
+        });
+      }
+
+      function connect(symbol) {
+        if (ws) {
+          ws.close();
+          ws = null;
+        }
+        currentSymbol = symbol;
+        setStatus(false, 'Connecting…');
+        const url = WS_BASE + '/ws/' + symbol;
+        ws = new WebSocket(url);
+        ws.onopen = function() {
+          setStatus(true, 'Connected (waiting for historical)');
+        };
+        ws.onmessage = function(ev) {
+          let data;
+          try {
+            data = JSON.parse(ev.data);
+          } catch (e) {
+            return;
+          }
+          if (data.type === 'error') {
+            setStatus(false, data.message || 'Error');
+            return;
+          }
+          if (data.type === 'historical') {
+            const candles = (data.data || []).map(function(c) {
+              return { time: Math.floor(c.time / 1000), open: c.open, high: c.high, low: c.low, close: c.close };
+            });
+            if (candleSeries && candles.length) {
+              candleSeries.setData(candles);
+              chart.timeScale().fitContent();
+            }
+            setStatus(true, 'Live');
+            setLastUpdate('Historical loaded: ' + candles.length + ' candles');
+          } else if (data.type === 'live_candle') {
+            const c = {
+              time: Math.floor(data.time / 1000),
+              open: data.open,
+              high: data.high,
+              low: data.low,
+              close: data.close,
+            };
+            if (candleSeries) candleSeries.update(c);
+            setLastUpdate(new Date().toLocaleTimeString() + (data.is_closed ? ' (candle closed)' : ''));
+          }
+        };
+        ws.onclose = function() {
+          ws = null;
+          setStatus(false, 'Disconnected');
+        };
+        ws.onerror = function() {
+          setStatus(false, 'Error');
+        };
+      }
+
+      function loadSymbols() {
+        fetch(API_BASE + '/api/symbols')
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            const syms = res.symbols || [];
+            symbolSelect.innerHTML = syms.map(function(s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
+            if (syms.length) {
+              currentSymbol = syms[0];
+              symbolSelect.value = currentSymbol;
+              connect(currentSymbol);
+            }
+          })
+          .catch(function() {
+            symbolSelect.innerHTML = '<option value="BTCUSDT">BTCUSDT</option><option value="ETHUSDT">ETHUSDT</option><option value="SOLUSDT">SOLUSDT</option><option value="BNBUSDT">BNBUSDT</option><option value="XRPUSDT">XRPUSDT</option>';
+            currentSymbol = 'BTCUSDT';
+            symbolSelect.value = currentSymbol;
+            connect(currentSymbol);
+          });
+      }
+
+      symbolSelect.addEventListener('change', function() {
+        const sym = symbolSelect.value;
+        if (sym && sym !== currentSymbol) connect(sym);
+      });
+
+      initChart();
+      loadSymbols();
+    })();
+  </script>
+</body>
+</html>

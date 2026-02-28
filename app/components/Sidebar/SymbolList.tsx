@@ -78,6 +78,9 @@ export default function SymbolList() {
   };
 
   const handleSymbolClick = (symbol: string) => {
+    console.log('═'.repeat(60));
+    console.log('🔴 SYMBOL CHANGE TRIGGERED | New symbol:', symbol, '| Previous:', selectedSymbol);
+    console.log('═'.repeat(60));
     setSelectedSymbol(symbol);
   };
 
