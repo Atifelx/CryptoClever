@@ -271,29 +271,34 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     return { signal: 'WAIT', reason: 'Calculating indicators...' };
   }
 
-  // LONG signal conditions (from Python algorithm)
+  // LONG signal conditions (RELAXED for 1-minute scalping)
+  // For 1-minute candles, we need faster signals - relaxed thresholds
   const longConditions = [
     currentEMAFast > currentEMASlow, // Uptrend
-    prevEMAFast <= prevEMASlow, // EMA crossover (fast was <= slow, now >)
-    currentRSI > 40 && currentRSI < 70, // RSI not overbought
-    currentClose > currentVWAP, // Price above VWAP
-    volumeRatio > 1.2, // Volume confirmation (>1.2x average)
-    currentMomentum > 0, // Positive momentum
+    prevEMAFast <= prevEMASlow || (currentEMAFast > currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005), // EMA crossover OR strong trend (>0.05% separation)
+    currentRSI > 35 && currentRSI < 75, // RSI relaxed range (was 40-70)
+    currentClose > currentVWAP * 0.9995, // Price near or above VWAP (relaxed from exact >)
+    volumeRatio > 0.8, // Volume relaxed: >0.8x average (was >1.2x) for 1-minute scalping
+    currentMomentum > -0.1, // Positive or slightly negative momentum (was >0)
   ];
 
-  // SHORT signal conditions
+  // SHORT signal conditions (RELAXED for 1-minute scalping)
   const shortConditions = [
     currentEMAFast < currentEMASlow, // Downtrend
-    prevEMAFast >= prevEMASlow, // EMA crossover (fast was >= slow, now <)
-    currentRSI < 60 && currentRSI > 30, // RSI not oversold
-    currentClose < currentVWAP, // Price below VWAP
-    volumeRatio > 1.2, // Volume confirmation (>1.2x average)
-    currentMomentum < 0, // Negative momentum
+    prevEMAFast >= prevEMASlow || (currentEMAFast < currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005), // EMA crossover OR strong trend
+    currentRSI < 65 && currentRSI > 25, // RSI relaxed range (was 30-60)
+    currentClose < currentVWAP * 1.0005, // Price near or below VWAP (relaxed)
+    volumeRatio > 0.8, // Volume relaxed: >0.8x average (was >1.2x)
+    currentMomentum < 0.1, // Negative or slightly positive momentum (was <0)
   ];
 
-  // Bollinger Band mean reversion signals
-  const bbLong = currentClose < currentBBLower && currentRSI < 35;
-  const bbShort = currentClose > currentBBUpper && currentRSI > 65;
+  // Bollinger Band mean reversion signals (more aggressive)
+  const bbLong = currentClose < currentBBLower && currentRSI < 40; // Relaxed from 35
+  const bbShort = currentClose > currentBBUpper && currentRSI > 60; // Relaxed from 65
+
+  // Strong momentum signals (for fast 1-minute scalping)
+  const strongMomentumLong = currentMomentum > 0.3 && currentEMAFast > currentEMASlow && volumeRatio > 0.6;
+  const strongMomentumShort = currentMomentum < -0.3 && currentEMAFast < currentEMASlow && volumeRatio > 0.6;
 
   // Generate signal
   const longScore = longConditions.filter(Boolean).length;
@@ -303,7 +308,8 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const TAKE_PROFIT_PCT = 0.008; // 0.8%
   const STOP_LOSS_PCT = 0.004; // 0.4%
 
-  if (longScore >= 5 || bbLong) {
+  // RELAXED THRESHOLD: Require 4/6 conditions (was 5/6) OR strong momentum OR BB mean reversion
+  if (longScore >= 4 || bbLong || strongMomentumLong) {
     // LONG signal
     const stopLoss = currentClose * (1 - STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 + TAKE_PROFIT_PCT);
@@ -312,8 +318,10 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     // Calculate confidence based on conditions met
     let confidence = 70;
     if (longScore >= 6) confidence = 90;
+    else if (strongMomentumLong) confidence = 85; // Strong momentum
     else if (bbLong) confidence = 75; // BB mean reversion
-    else if (longScore === 5) confidence = 75;
+    else if (longScore >= 5) confidence = 80;
+    else if (longScore === 4) confidence = 70; // Relaxed threshold
 
     return {
       signal: 'LONG',
@@ -322,14 +330,16 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       takeProfit1,
       takeProfit2,
       confidence,
-      reason: bbLong 
+      reason: strongMomentumLong 
+        ? `Strong momentum (${currentMomentum.toFixed(2)}%)`
+        : bbLong 
         ? 'Bollinger Band mean reversion (oversold)' 
-        : `EMA crossover + momentum (${longScore}/6 conditions)`,
+        : `EMA trend + momentum (${longScore}/6 conditions, vol: ${volumeRatio.toFixed(2)}x)`,
       marketState: 'BULLISH_TREND',
       rsi: currentRSI,
-      volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.2 ? 'MODERATE' : 'NORMAL',
+      volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.0 ? 'MODERATE' : 'NORMAL',
     };
-  } else if (shortScore >= 5 || bbShort) {
+  } else if (shortScore >= 4 || bbShort || strongMomentumShort) {
     // SHORT signal
     const stopLoss = currentClose * (1 + STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 - TAKE_PROFIT_PCT);
@@ -338,8 +348,10 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     // Calculate confidence based on conditions met
     let confidence = 70;
     if (shortScore >= 6) confidence = 90;
+    else if (strongMomentumShort) confidence = 85; // Strong momentum
     else if (bbShort) confidence = 75; // BB mean reversion
-    else if (shortScore === 5) confidence = 75;
+    else if (shortScore >= 5) confidence = 80;
+    else if (shortScore === 4) confidence = 70; // Relaxed threshold
 
     return {
       signal: 'SHORT',
@@ -348,27 +360,29 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       takeProfit1,
       takeProfit2,
       confidence,
-      reason: bbShort 
+      reason: strongMomentumShort 
+        ? `Strong momentum (${currentMomentum.toFixed(2)}%)`
+        : bbShort 
         ? 'Bollinger Band mean reversion (overbought)' 
-        : `EMA crossover + momentum (${shortScore}/6 conditions)`,
+        : `EMA trend + momentum (${shortScore}/6 conditions, vol: ${volumeRatio.toFixed(2)}x)`,
       marketState: 'BEARISH_TREND',
       rsi: currentRSI,
-      volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.2 ? 'MODERATE' : 'NORMAL',
+      volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.0 ? 'MODERATE' : 'NORMAL',
     };
   }
 
   // No signal - provide detailed feedback
   const trend = currentEMAFast > currentEMASlow ? 'BULLISH' : 'BEARISH';
-  const missingLong = longConditions.map((cond, i) => !cond ? i : -1).filter(i => i >= 0);
-  const missingShort = shortConditions.map((cond, i) => !cond ? i : -1).filter(i => i >= 0);
-
+  
   let reason = 'Waiting for signal conditions';
-  if (trend === 'BULLISH' && longScore < 5) {
-    reason = `Bullish trend but only ${longScore}/6 conditions met`;
-    if (volumeRatio < 1.2) reason += ` (volume: ${volumeRatio.toFixed(2)}x, need >1.2x)`;
-  } else if (trend === 'BEARISH' && shortScore < 5) {
-    reason = `Bearish trend but only ${shortScore}/6 conditions met`;
-    if (volumeRatio < 1.2) reason += ` (volume: ${volumeRatio.toFixed(2)}x, need >1.2x)`;
+  if (trend === 'BULLISH' && longScore < 4) {
+    reason = `Bullish trend but only ${longScore}/6 conditions met (need 4+)`;
+    if (volumeRatio < 0.8) reason += ` (volume: ${volumeRatio.toFixed(2)}x, need >0.8x)`;
+    else if (currentMomentum <= -0.1) reason += ` (momentum: ${currentMomentum.toFixed(2)}%, need >-0.1%)`;
+  } else if (trend === 'BEARISH' && shortScore < 4) {
+    reason = `Bearish trend but only ${shortScore}/6 conditions met (need 4+)`;
+    if (volumeRatio < 0.8) reason += ` (volume: ${volumeRatio.toFixed(2)}x, need >0.8x)`;
+    else if (currentMomentum >= 0.1) reason += ` (momentum: ${currentMomentum.toFixed(2)}%, need <0.1%)`;
   } else {
     reason = 'No clear trend or conditions not met';
   }
