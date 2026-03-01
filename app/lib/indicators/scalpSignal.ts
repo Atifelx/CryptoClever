@@ -240,11 +240,13 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     return { signal: 'WAIT', reason: 'Choppy market - EMAs tangled' };
   }
 
-  // Volume confirmation: relaxed thresholds
+  // Volume confirmation: Following user's algorithm - relaxed thresholds
   // Strong surge: > 1.2× MA (for high confidence)
-  // Moderate: > 0.9× MA (acceptable if other conditions are strong)
+  // Moderate: > 0.8× MA (80% of average as per user's algorithm)
+  // Minimum acceptable: > 0.6× MA (very relaxed for scalping opportunities)
   const volumeSurgeStrong = currentVolumeMA > 0 && currentVolume > currentVolumeMA * 1.2;
-  const volumeSurgeModerate = currentVolumeMA > 0 && currentVolume > currentVolumeMA * 0.9;
+  const volumeSurgeModerate = currentVolumeMA > 0 && currentVolume > currentVolumeMA * 0.8; // Changed from 0.9 to 0.8
+  const volumeSurgeMinimal = currentVolumeMA > 0 && currentVolume > currentVolumeMA * 0.6; // New: very relaxed threshold
   const volumeSurge = volumeSurgeStrong; // For backward compatibility
 
   // LONG
@@ -302,20 +304,23 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
         takeProfit1,
         takeProfit2,
         confidence,
-        reason: volumeSurgeStrong ? 'All bearish conditions met' : 'Bearish trend with moderate volume',
+        reason: volumeSurgeStrong ? 'All bearish conditions met' : 
+                volumeSurgeModerate ? 'Bearish trend with moderate volume' : 
+                'Bearish trend with low volume (relaxed)',
       };
     }
   }
 
   // If we have a clear trend but volume is too low, provide more helpful feedback
-  if ((isBullishTrend || isBearishTrend) && !volumeSurgeModerate) {
+  // Only show WAIT if volume is below minimal threshold (0.6x)
+  if ((isBullishTrend || isBearishTrend) && !volumeSurgeMinimal) {
     const volumeRatio = currentVolumeMA > 0 ? (currentVolume / currentVolumeMA).toFixed(2) : '0';
     return {
       signal: 'WAIT',
-      reason: `Low volume (${volumeRatio}x avg) - need >0.9x`,
+      reason: `Very low volume (${volumeRatio}x avg) - need >0.6x`,
       marketState: isBullishTrend ? 'BULLISH_TREND' : 'BEARISH_TREND',
       rsi: currentRSI,
-      volume: 'LOW',
+      volume: 'VERY_LOW',
     };
   }
 
