@@ -62,6 +62,52 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/test/binance")
+async def test_binance():
+    """Test endpoint to verify Binance API connectivity from Render."""
+    import httpx
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": "BTCUSDT", "interval": "1m", "limit": 5}
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+            return {
+                "status": "success",
+                "binance_reachable": True,
+                "candles_received": len(data),
+                "sample_candle": {
+                    "time": data[0][0] if data else None,
+                    "open": data[0][1] if data else None,
+                    "close": data[0][4] if data else None,
+                } if data else None,
+                "message": "✅ Binance API is accessible from Render"
+            }
+    except httpx.TimeoutException:
+        return {
+            "status": "error",
+            "binance_reachable": False,
+            "error": "Timeout - Binance API not responding within 10 seconds",
+            "message": "❌ Binance API may be blocked or unreachable"
+        }
+    except httpx.HTTPStatusError as e:
+        return {
+            "status": "error",
+            "binance_reachable": False,
+            "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}",
+            "message": "❌ Binance API returned an error"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "binance_reachable": False,
+            "error": str(e),
+            "message": "❌ Failed to connect to Binance API"
+        }
+
+
 @app.get("/debug/store-keys")
 async def debug_store_keys():
     """Debug: list candle store keys with count, first_time, last_time. Verify 5 keys (one per symbol) with uppercase symbols."""
