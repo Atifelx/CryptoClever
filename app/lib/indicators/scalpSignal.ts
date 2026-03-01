@@ -187,15 +187,20 @@ function calculateMomentum(closes: number[], period: number): number[] {
 /**
  * Generate scalp signal using the new algorithm
  * Uses only closed candles (excludes forming candle) to avoid repainting.
+ * 
+ * Strategy: Read 1000 candles for calibration, but analyze last 5 candles for fast swing reversal detection
  */
 export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const closedCandles = candles.slice(0, candles.length - 1);
-  if (closedCandles.length < 50) {
-    return { signal: 'WAIT', reason: 'Insufficient data (need at least 50 candles)' };
+  if (closedCandles.length < 100) {
+    return { signal: 'WAIT', reason: 'Insufficient data (need at least 100 candles)' };
   }
 
-  // Use last 500 candles if available, otherwise use all
-  const data = closedCandles.length > 500 ? closedCandles.slice(-500) : closedCandles;
+  // Use last 1000 candles for better swing detection and calibration (was 500)
+  const data = closedCandles.length > 1000 ? closedCandles.slice(-1000) : closedCandles;
+  
+  // Analyze last 5 closed candles for quick swing reversal detection
+  const recentCandles = data.slice(-5);
 
   const closes = data.map((c) => c.close);
   const highs = data.map((c) => c.high);
@@ -271,6 +276,42 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     return { signal: 'WAIT', reason: 'Calculating indicators...' };
   }
 
+  // ──── SWING REVERSAL DETECTION (Last 5 candles) ────
+  // Fast detection for quick trade entry
+  let swingReversalLong = false;
+  let swingReversalShort = false;
+  
+  if (recentCandles.length >= 5) {
+    // Detect swing low reversal (potential LONG)
+    const lows = recentCandles.map(c => c.low);
+    const closes = recentCandles.map(c => c.close);
+    const minLowIndex = lows.indexOf(Math.min(...lows));
+    
+    // Swing low reversal: lowest point in middle, then price moves up
+    if (minLowIndex >= 1 && minLowIndex <= 3) {
+      const swingLow = lows[minLowIndex];
+      const afterSwing = closes.slice(minLowIndex + 1);
+      // Check if price recovered after swing low
+      if (afterSwing.length > 0 && afterSwing[afterSwing.length - 1] > swingLow * 1.001) {
+        swingReversalLong = true;
+      }
+    }
+    
+    // Detect swing high reversal (potential SHORT)
+    const highs = recentCandles.map(c => c.high);
+    const maxHighIndex = highs.indexOf(Math.max(...highs));
+    
+    // Swing high reversal: highest point in middle, then price moves down
+    if (maxHighIndex >= 1 && maxHighIndex <= 3) {
+      const swingHigh = highs[maxHighIndex];
+      const afterSwing = closes.slice(maxHighIndex + 1);
+      // Check if price dropped after swing high
+      if (afterSwing.length > 0 && afterSwing[afterSwing.length - 1] < swingHigh * 0.999) {
+        swingReversalShort = true;
+      }
+    }
+  }
+
   // LONG signal conditions (RELAXED for 1-minute scalping)
   // For 1-minute candles, we need faster signals - relaxed thresholds
   const longConditions = [
@@ -330,7 +371,9 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       takeProfit1,
       takeProfit2,
       confidence,
-      reason: strongMomentumLong 
+      reason: swingReversalLong
+        ? `Swing reversal detected (last 5 candles)`
+        : strongMomentumLong 
         ? `Strong momentum (${currentMomentum.toFixed(2)}%)`
         : bbLong 
         ? 'Bollinger Band mean reversion (oversold)' 
@@ -360,7 +403,9 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       takeProfit1,
       takeProfit2,
       confidence,
-      reason: strongMomentumShort 
+      reason: swingReversalShort
+        ? `Swing reversal detected (last 5 candles)`
+        : strongMomentumShort 
         ? `Strong momentum (${currentMomentum.toFixed(2)}%)`
         : bbShort 
         ? 'Bollinger Band mean reversion (overbought)' 
