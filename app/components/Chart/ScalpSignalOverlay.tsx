@@ -32,17 +32,18 @@ export default function ScalpSignalOverlay({
     return null;
   }
 
-  // Position at bottom of chart, behind/at tail of Trend Indicator arrow
-  const bottomPosition = 'bottom-4';
-
   const isLong = latestSignal.signal === 'LONG';
   const rsiText = latestSignal.rsi != null ? `RSI: ${latestSignal.rsi.toFixed(0)}` : '';
   const tp2Text = `TP2: ${latestSignal.takeProfit2.toFixed(0)}`;
   const slText = `SL: ${latestSignal.stopLoss.toFixed(0)}`;
   const label = `Scalp ${latestSignal.signal}${rsiText ? ` | ${rsiText}` : ''} | ${tp2Text} | ${slText}`;
 
+  // Position inside chart area: below Trend Indicator arrow (top-16) or at top if no trend indicator
+  // Use percentage-based positioning to stay within chart bounds
+  const topPosition = trendMarker ? 'top-[60px]' : 'top-2';
+
   return (
-    <div className={`absolute ${bottomPosition} left-1/2 transform -translate-x-1/2 z-20 pointer-events-none`}>
+    <div className={`absolute ${topPosition} left-1/2 transform -translate-x-1/2 z-20 pointer-events-none`}>
       {/* White Circle with Pulsing Glow Animation */}
       <div className="flex flex-col items-center gap-2">
         {/* Pulsing White Circle - positioned at tail/end of arrow */}

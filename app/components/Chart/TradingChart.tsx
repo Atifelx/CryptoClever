@@ -719,21 +719,24 @@ export default function TradingChart({
           </div>
         )}
 
-        {/* Chart container - force recreation with unique key */}
-        <div key={`chart-container-${symbol}`} ref={chartContainerRef} className="w-full h-full relative" />
-        
-        {/* Trend Indicator Overlay - Renders at top of chart */}
-        <TrendIndicatorOverlay
-          trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
-          showTrend={isEnabled('trendIndicator')}
-        />
-        
-        {/* Scalp Signal Overlay - White circle below Trend Indicator arrow with pulsing glow */}
-        <ScalpSignalOverlay
-          scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
-          trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
-          showScalp={isEnabled('scalpSignal')}
-        />
+        {/* Chart container with overlays positioned inside */}
+        <div key={`chart-container-${symbol}`} className="w-full h-full relative">
+          {/* Chart canvas */}
+          <div ref={chartContainerRef} className="w-full h-full" />
+          
+          {/* Trend Indicator Overlay - Renders at top inside chart area */}
+          <TrendIndicatorOverlay
+            trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
+            showTrend={isEnabled('trendIndicator')}
+          />
+          
+          {/* Scalp Signal Overlay - White circle below Trend Indicator arrow, inside chart area */}
+          <ScalpSignalOverlay
+            scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
+            trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
+            showScalp={isEnabled('scalpSignal')}
+          />
+        </div>
         
         {/* Unified Marker Manager - Merges markers from all indicators */}
         {candleSeriesRef.current && (
