@@ -40,14 +40,5 @@ export async function fetchAllTradingPairs(): Promise<CategorizedPairs> {
 export function getPopularPairs(): TradingPair[] {
   return [
     { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', name: 'BTC/USDT', displayName: 'Bitcoin' },
-    { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', name: 'ETH/USDT', displayName: 'Ethereum' },
-    { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', name: 'BNB/USDT', displayName: 'Binance Coin' },
-    { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', name: 'SOL/USDT', displayName: 'Solana' },
-    { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', name: 'XRP/USDT', displayName: 'Ripple' },
-    { symbol: 'ADAUSDT', baseAsset: 'ADA', quoteAsset: 'USDT', name: 'ADA/USDT', displayName: 'Cardano' },
-    { symbol: 'DOGEUSDT', baseAsset: 'DOGE', quoteAsset: 'USDT', name: 'DOGE/USDT', displayName: 'Dogecoin' },
-    { symbol: 'MATICUSDT', baseAsset: 'MATIC', quoteAsset: 'USDT', name: 'MATIC/USDT', displayName: 'Polygon' },
-    { symbol: 'DOTUSDT', baseAsset: 'DOT', quoteAsset: 'USDT', name: 'DOT/USDT', displayName: 'Polkadot' },
-    { symbol: 'LTCUSDT', baseAsset: 'LTC', quoteAsset: 'USDT', name: 'LTC/USDT', displayName: 'Litecoin' },
   ];
 }

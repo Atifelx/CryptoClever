@@ -7,8 +7,8 @@ import type { Candle } from '../../store/candlesStore';
 import { calculateSemafor, getSemaforTrend } from '../../lib/indicators/semafor';
 import { SemaforPoint } from '../../lib/indicators/types';
 import type { SemaforTrend } from '../../lib/indicators/semafor';
-import { detectPatterns } from '../../lib/indicators/patternRecognition';
-import { PatternSignal } from '../../lib/indicators/patternRecognition';
+import { generateScalpSignal, getScalpDisplayItems } from '../../lib/indicators/scalpSignal';
+import type { ScalpDisplayItem } from '../../lib/indicators/scalpSignal';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
 import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
@@ -21,7 +21,7 @@ interface TradingChartProps {
   onIndicatorDataUpdate?: (data: {
     semaforPoints: SemaforPoint[];
     semaforTrend: SemaforTrend;
-    patternSignals: PatternSignal[];
+    scalpSignals: ScalpDisplayItem[];
   }) => void;
 }
 
@@ -36,7 +36,6 @@ export default function TradingChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const [loading, setLoading] = useState(true);
   const [showBackendUnavailable, setShowBackendUnavailable] = useState(false);
   const [currentPrice, setCurrentPrice] = useState<number>(0);
   const [candleSize, setCandleSize] = useState<number>(3);
@@ -45,27 +44,28 @@ export default function TradingChart({
   const panStartXRef = useRef<number>(0);
   const panStartPositionRef = useRef<number | null>(null);
 
-  const { candles: rawCandles, isConnected } = useCandles(symbol);
+  const { candles, isConnected, isLoading } = useCandles();
 
-  // Normalize useCandles format (timestamp ms) to chart format (time in seconds) for lightweight-charts and indicators
-  const candles: Candle[] = useMemo(
-    () =>
-      rawCandles.map((c) => ({
-        time: c.timestamp / 1000,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-        volume: c.volume,
-      })),
-    [rawCandles]
-  );
-  const isLoading = candles.length === 0;
+  // DEBUG: Log what data TradingChart receives from useCandles
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development' && candles.length > 0) {
+      const first3 = candles.slice(0, 3).map((c) => c.close.toFixed(2));
+      const last3 = candles.slice(-3).map((c) => c.close.toFixed(2));
+      console.log(`🎨 [TradingChart] symbol="${symbol}" count=${candles.length} FIRST=[${first3.join(',')}] LAST=[${last3.join(',')}]`);
+    }
+  }, [symbol, candles]);
 
-  // Track previous symbol/interval and candle count for efficient updates/interval and candle count for efficient updates
+  // Candles from Zustand store are already in chart format (time in seconds)
+  // isLoading is now provided by useCandles hook
+
+  // Track previous symbol/interval and candle count for efficient updates
   const prevSymbolRef = useRef<string>(symbol);
   const prevIntervalRef = useRef<string>(interval);
   const prevCandlesLenRef = useRef<number>(0);
+  /** Symbol for which we last set chart data; avoid applying stale data after symbol change. */
+  const chartDataSymbolRef = useRef<string | null>(symbol);
+  /** Track if this is the first data load after component mount - always use setData() */
+  const isFirstDataLoadRef = useRef<boolean>(true);
   
   // Calculate Semafor when candles change
   const semaforPoints = useMemo((): SemaforPoint[] => {
@@ -98,101 +98,77 @@ export default function TradingChart({
     }
   }, [candles.length, candles[candles.length - 1]?.time, isLoading]);
 
-  // Pattern Recognition with locking mechanism
-  // Only recalculate when a NEW CANDLE CLOSES (not on every WebSocket tick)
-  const lastClosedCandleTimeRef = useRef<number>(0);
-  const lockedPatternRef = useRef<PatternSignal[]>([]);
-
-  const patternSignals = useMemo((): PatternSignal[] => {
-    if (typeof window === 'undefined') return lockedPatternRef.current;
-    if (isLoading || candles.length < 50) return lockedPatternRef.current;
+  // Scalp Signal Indicator — current-candle only, closed candles only (no repainting)
+  // Returns array of one item (like Phoenix) so we always have something to draw when Scalp is on
+  const scalpSignals = useMemo((): ScalpDisplayItem[] => {
+    if (typeof window === 'undefined') return [];
+    if (isLoading || candles.length < 101) return []; // need 100+ closed => 101+ total
 
     try {
-      // Only analyze CLOSED candles (exclude forming candle)
-      const closedCandles = candles.slice(0, candles.length - 1);
-      if (closedCandles.length < 50) return lockedPatternRef.current;
-
-      // Get the last CLOSED candle time
-      const lastClosedTime = closedCandles[closedCandles.length - 1]?.time || 0;
-
-      // Only recalculate if a NEW candle has closed (time changed)
-      if (lastClosedTime === lastClosedCandleTimeRef.current) {
-        // No new candle closed - return locked pattern
-        return lockedPatternRef.current;
-      }
-
-      // New candle closed - recalculate patterns
-      lastClosedCandleTimeRef.current = lastClosedTime;
-
-      // Lower threshold for single-candle patterns (Hammer, Doji, etc.) - they're more immediate
-      const newPatterns = detectPatterns(candles, 60); // Lowered to 60% to catch more patterns
-
-      // Only update if we found a valid pattern
-      if (newPatterns.length > 0) {
-        const newPattern = newPatterns[0];
-        const lockedPattern = lockedPatternRef.current[0];
-
-        if (!lockedPattern) {
-          // No locked pattern - lock the new one
-          lockedPatternRef.current = newPatterns;
-          console.log('[Pattern] Pattern locked:', newPattern.description, `(${newPattern.confidence}%)`);
-          return newPatterns;
-        }
-
-        // Check how old the locked pattern is (in candles)
-        const lockedPatternIndex = closedCandles.findIndex(c => c.time === lockedPattern.time);
-        const newPatternIndex = closedCandles.findIndex(c => c.time === newPattern.time);
-        
-        // If locked pattern is very old (10+ candles), allow replacement
-        const lockedPatternAge = closedCandles.length - 1 - lockedPatternIndex;
-        
-        // Update if:
-        // 1. New pattern is on a different candle AND locked pattern is old (5+ candles), OR
-        // 2. New pattern has significantly higher confidence (+15% not just +10%), OR
-        // 3. Locked pattern is very old (10+ candles) - time to refresh
-        if ((newPattern.time !== lockedPattern.time && lockedPatternAge >= 5) ||
-            (newPattern.confidence >= lockedPattern.confidence + 15) ||
-            (lockedPatternAge >= 10)) {
-          lockedPatternRef.current = newPatterns;
-          console.log('[Pattern] Pattern updated:', newPattern.description, `(${newPattern.confidence}%) - Old pattern was ${lockedPatternAge} candles old`);
-          return newPatterns;
-        }
-      }
-
-      // Keep locked pattern if new detection is weaker or too recent
-      // This prevents rapid repainting
-      return lockedPatternRef.current;
+      const result = generateScalpSignal(candles);
+      const lastClosedTime = candles[candles.length - 2]?.time ?? 0;
+      return getScalpDisplayItems(result, lastClosedTime);
     } catch (error) {
-      console.error('Pattern recognition calc error:', error);
-      return lockedPatternRef.current;
+      console.error('[Scalp] Calculation error:', error);
+      return [];
     }
   }, [
-    symbol,
-    interval,
     candles.length,
-    // Only depend on the last CLOSED candle time, not the forming candle
-    candles.length > 1 ? candles[candles.length - 2]?.time : 0,
+    candles[candles.length - 2]?.time,
+    candles[candles.length - 2]?.close,
     isLoading,
   ]);
-
-  // Reset locked pattern when symbol/interval changes
-  useEffect(() => {
-    lockedPatternRef.current = [];
-    lastClosedCandleTimeRef.current = 0;
-  }, [symbol, interval]);
 
   // Expose indicator data to parent component (deferred to avoid setState-during-render)
   useEffect(() => {
     if (!onIndicatorDataUpdate) return;
-    const payload = { semaforPoints, semaforTrend, patternSignals };
+    const payload = { semaforPoints, semaforTrend, scalpSignals };
     queueMicrotask(() => {
       onIndicatorDataUpdate(payload);
     });
-  }, [semaforPoints, semaforTrend, patternSignals, onIndicatorDataUpdate]);
+  }, [semaforPoints, semaforTrend, scalpSignals, onIndicatorDataUpdate]);
 
-  // Initialize chart (only once)
+  // Initialize chart - RECREATE when symbol changes to ensure clean state
   useEffect(() => {
-    if (!chartContainerRef.current || chartRef.current) return;
+    if (!chartContainerRef.current) return;
+    
+    console.log(`🏗️ [Chart] Creating NEW chart instance for ${symbol}`);
+    
+    // CRITICAL FIX: Always clean up existing chart before creating new one
+    if (chartRef.current) {
+      try {
+        console.log(`🗑️ [Chart] Removing old chart instance for ${symbol}`);
+        
+        // Remove series first to clear their internal state
+        if (candleSeriesRef.current) {
+          try {
+            chartRef.current.removeSeries(candleSeriesRef.current);
+          } catch (e) {
+            console.warn('[Chart] Error removing candle series:', e);
+          }
+        }
+        if (volumeSeriesRef.current) {
+          try {
+            chartRef.current.removeSeries(volumeSeriesRef.current);
+          } catch (e) {
+            console.warn('[Chart] Error removing volume series:', e);
+          }
+        }
+        
+        // Then remove the chart
+        chartRef.current.remove();
+      } catch (e) {
+        console.error('[Chart] Error removing old chart:', e);
+      }
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+    }
+    
+    // NUCLEAR OPTION: Clear the entire DOM container to force TradingView to start fresh
+    if (chartContainerRef.current) {
+      chartContainerRef.current.innerHTML = '';
+    }
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
@@ -208,8 +184,8 @@ export default function TradingChart({
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 0,
-        barSpacing: candleSize,
+        rightOffset: 5,
+        barSpacing: 6, // Tighter spacing for zoom-out view (more candles visible)
         fixLeftEdge: false,
         fixRightEdge: false,
         lockVisibleTimeRangeOnResize: false,
@@ -346,13 +322,14 @@ export default function TradingChart({
       window.removeEventListener('resize', handleResize);
       if (cleanupPanZoom) cleanupPanZoom();
       if (chartRef.current) {
+        console.log(`[Chart] Cleaning up chart for ${symbol}`);
         chartRef.current.remove();
         chartRef.current = null;
         candleSeriesRef.current = null;
         volumeSeriesRef.current = null;
       }
     };
-  }, []);
+  }, [symbol]); // CRITICAL: Recreate chart when symbol changes
 
   // Update candle size (barSpacing) when it changes
   useEffect(() => {
@@ -363,28 +340,51 @@ export default function TradingChart({
     }
   }, [candleSize]);
 
-  // On symbol/interval change: only reset refs so data effect will setData(new symbol from store).
-  // Do NOT clear chart — store has per-symbol data so we draw new symbol immediately (no ghosting).
+  // On symbol/interval change: clear chart immediately so no stale data from previous symbol is shown.
   useEffect(() => {
     if (prevSymbolRef.current !== symbol || prevIntervalRef.current !== interval) {
-      prevSymbolRef.current = symbol;
-      prevIntervalRef.current = interval;
-      prevCandlesLenRef.current = 0; // force full setData in data effect
+      console.log(`[Chart] Symbol/interval changed to ${symbol}/${interval}`);
+      
+      // DON'T update prevSymbolRef here - let the data effect handle it!
+      // This ensures isSymbolChange detection works correctly
+      prevCandlesLenRef.current = 0;
+      chartDataSymbolRef.current = null; // CRITICAL: Clear this to prevent stale data guard
       userInteractedRef.current = false;
+      // Loading state is now managed by useCandles hook
+      
       try {
+        if (candleSeriesRef.current && volumeSeriesRef.current) {
+          console.log('[Chart] Clearing all series data');
+          candleSeriesRef.current.setData([]);
+          volumeSeriesRef.current.setData([]);
+        }
         if (chartRef.current) {
           chartRef.current.timeScale().resetTimeScale();
         }
-      } catch {}
+      } catch (e) {
+        console.error('[Chart] Error during symbol change cleanup:', e);
+      }
     }
   }, [symbol, interval]);
 
   // Update chart data when candles change (from useCandles; candles are for current symbol after clear on symbol change).
   useEffect(() => {
+    console.log(`[Chart Data Effect] Triggered: symbol=${symbol}, candles=${candles.length}, seriesExists=${!!candleSeriesRef.current}`);
+    
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
     if (candles.length === 0) {
-      setLoading(isLoading);
       prevCandlesLenRef.current = 0;
+      try {
+        candleSeriesRef.current.setData([]);
+        volumeSeriesRef.current.setData([]);
+      } catch {}
+      return;
+    }
+
+    // CRITICAL FIX: On symbol change, chartDataSymbolRef is null, so allow the first setData
+    // After that, guard against stale data from previous symbol
+    if (chartDataSymbolRef.current !== null && symbol !== chartDataSymbolRef.current) {
+      console.warn(`[Chart] BLOCKING stale data: chart has ${chartDataSymbolRef.current} but received ${symbol}`);
       return;
     }
 
@@ -393,14 +393,19 @@ export default function TradingChart({
       console.log('📊 [TradingChart] Chart data update:', { symbol, candleCount: candles.length, lastCloses });
     }
 
-    setLoading(false);
     const prevLen = prevCandlesLenRef.current;
     const isInitialLoad = prevLen === 0;
     const hasNewCandle = candles.length !== prevLen;
     const isSymbolChange = prevSymbolRef.current !== symbol || prevIntervalRef.current !== interval;
+    const isFirstLoad = isFirstDataLoadRef.current;
 
-    // Full setData when: initial load, symbol/interval changed, or new candle arrived.
-    if (isInitialLoad || isSymbolChange || hasNewCandle) {
+    console.log(`[Chart Data Effect] Decision: prevLen=${prevLen}, isInitialLoad=${isInitialLoad}, hasNewCandle=${hasNewCandle}, isSymbolChange=${isSymbolChange}, isFirstLoad=${isFirstLoad}`);
+    console.log(`[Chart Data Effect] Refs: prevSymbol=${prevSymbolRef.current}, currentSymbol=${symbol}, prevInterval=${prevIntervalRef.current}`);
+
+    // CRITICAL: Always use setData on first data load after component mount OR symbol/interval change OR new candle
+    if (isFirstLoad || isInitialLoad || isSymbolChange || hasNewCandle) {
+      // Mark that first load is complete
+      isFirstDataLoadRef.current = false;
       const candlestickData = candles.map((c: Candle) => ({
         time: c.time as Time,
         open: c.open,
@@ -415,8 +420,49 @@ export default function TradingChart({
       }));
 
       try {
+        if (process.env.NODE_ENV === 'development') {
+          const lastClose = candles[candles.length - 1]?.close;
+          const first3Times = candlestickData.slice(0, 3).map(c => c.time);
+          const first3Closes = candlestickData.slice(0, 3).map(c => c.close);
+          const last3Times = candlestickData.slice(-3).map(c => c.time);
+          const last3Closes = candlestickData.slice(-3).map(c => c.close);
+          console.log(`[TradingChart] setData for ${symbol}: count=${candlestickData.length}`);
+          console.log(`  FIRST times: ${first3Times.join(',')} closes: ${first3Closes.join(',')}`);
+          console.log(`  LAST times: ${last3Times.join(',')} closes: ${last3Closes.join(',')}`);
+          
+          // VALIDATION: Check if we're rendering the correct symbol's data
+          const mid3Index = Math.floor(candlestickData.length / 2);
+          const mid3 = candlestickData.slice(mid3Index, mid3Index + 3);
+          console.log(`  MIDDLE [${mid3Index}]: times=${mid3.map(c => c.time).join(',')} closes=${mid3.map(c => c.close).join(',')}`);
+          console.log(`  ⚠️ VERIFY: Chart instance ID: ${chartRef.current ? 'exists' : 'null'}, Series ID: ${candleSeriesRef.current ? 'exists' : 'null'}`);
+          
+          // CRITICAL VALIDATION: Check if price range matches the expected symbol
+          const avgPrice = (first3Closes[0] + mid3[0].close + last3Closes[0]) / 3;
+          console.log(`  🔍 PRICE CHECK: symbol=${symbol}, avgPrice=${avgPrice.toFixed(2)}`);
+          
+          // Expected price ranges for validation
+          const expectedRanges: Record<string, [number, number]> = {
+            'BTCUSDT': [50000, 100000],
+            'ETHUSDT': [1000, 10000],
+            'SOLUSDT': [50, 500],
+            'BNBUSDT': [200, 1000],
+            'XRPUSDT': [0.5, 10]
+          };
+          
+          const range = expectedRanges[symbol];
+          if (range && (avgPrice < range[0] || avgPrice > range[1])) {
+            console.error(`❌ DATA MISMATCH! ${symbol} should be ${range[0]}-${range[1]} but got ${avgPrice.toFixed(2)}`);
+          } else {
+            console.log(`  ✅ PRICE VALIDATION PASSED for ${symbol}`);
+          }
+          
+          // Log a sample of the actual data object being passed
+          console.log('  Sample candlestick data:', JSON.stringify(candlestickData.slice(0, 2)));
+        }
         candleSeriesRef.current.setData(candlestickData);
         volumeSeriesRef.current.setData(volumeData);
+        console.log(`✅ [Chart] Successfully called setData for ${symbol} (${candlestickData.length} candles)`);
+        chartDataSymbolRef.current = symbol;
         const lastCandle = candles[candles.length - 1];
         if (lastCandle) setCurrentPrice(lastCandle.close);
         prevCandlesLenRef.current = candles.length;
@@ -429,7 +475,17 @@ export default function TradingChart({
               setTimeout(() => {
                 try {
                   if (chartRef.current && candlestickData.length > 0) {
-                    chartRef.current.timeScale().fitContent();
+                    // Zoom OUT view: show more candles for broad overview (~150 candles)
+                    const visibleCandles = 150;
+                    const lastTime = candlestickData[candlestickData.length - 1].time as number;
+                    const firstVisibleIndex = Math.max(0, candlestickData.length - visibleCandles);
+                    const firstTime = candlestickData[firstVisibleIndex].time as number;
+                    
+                    chartRef.current.timeScale().setVisibleRange({
+                      from: firstTime as Time,
+                      to: lastTime as Time,
+                    });
+                    
                     if (chartContainerRef.current && chartRef.current)
                       chartRef.current.applyOptions({
                         width: chartContainerRef.current.clientWidth,
@@ -443,10 +499,10 @@ export default function TradingChart({
         }
       } catch (error) {
         console.error('[Chart] Error setting chart data:', error);
-        setLoading(false);
       }
     } else {
       // Same length, only last candle updated (e.g. from poll): use update().
+      console.log(`[Chart] Using UPDATE (not setData) for ${symbol} - same candle count: ${candles.length}`);
       const lastCandle = candles[candles.length - 1];
       if (lastCandle) {
         try {
@@ -554,7 +610,7 @@ export default function TradingChart({
       </div>
 
       <div className="relative flex-1 min-h-0">
-        {loading && (
+        {isLoading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#1a1a1a] bg-opacity-90 z-20">
             <div className="w-10 h-10 border-2 border-[#26a69a] border-t-transparent rounded-full animate-spin mb-3" />
             <div className="text-white font-medium">Loading {symbol}...</div>
@@ -600,17 +656,17 @@ export default function TradingChart({
           </div>
         )}
 
-        {/* Chart container */}
-        <div ref={chartContainerRef} className="w-full h-full" />
+        {/* Chart container - force recreation with unique key */}
+        <div key={`chart-container-${symbol}`} ref={chartContainerRef} className="w-full h-full" />
         
         {/* Unified Marker Manager - Merges markers from all indicators */}
         {candleSeriesRef.current && (
           <UnifiedMarkerManager
             candleSeries={candleSeriesRef.current}
             semaforPoints={isEnabled('semafor') ? semaforPoints : []}
-            patternSignals={isEnabled('patternRecognition') ? patternSignals : []}
+            scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
             showSemafor={isEnabled('semafor')}
-            showPatternRecognition={isEnabled('patternRecognition')}
+            showScalp={isEnabled('scalpSignal')}
           />
         )}
       </div>

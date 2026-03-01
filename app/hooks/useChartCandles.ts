@@ -1,20 +1,14 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useCandlesStore, candleKey, type Candle } from '../store/candlesStore';
+import { useCandlesStore, type Candle } from '../store/candlesStore';
 import { useTradingStore } from '../store/tradingStore';
 
-/** Stable empty array so selector never returns a new reference when key is missing (avoids infinite effect loop). */
-const EMPTY_CANDLES: Candle[] = [];
-
 /**
- * Returns candles for the given symbol/interval from Zustand (backend-backed).
- * When user switches symbol, data is already in store so chart renders immediately
- * without clearing or waiting for a new fetch (no ghosting).
+ * Returns BTC candles from Zustand store (simplified for BTC-only operation)
  */
-export function useChartCandles(symbol: string, interval: string) {
-  const key = candleKey(symbol, interval);
-  const candles = useCandlesStore((state) => state.candlesByKey[key]) ?? EMPTY_CANDLES;
+export function useChartCandles() {
+  const candles = useCandlesStore((state) => state.btcCandles);
   const updateTradingData = useTradingStore((s) => s.updateTradingData);
 
   useEffect(() => {

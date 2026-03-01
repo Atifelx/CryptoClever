@@ -3,30 +3,27 @@
 import { useEffect, useRef } from 'react';
 import { ISeriesApi } from 'lightweight-charts';
 import { SemaforPoint } from '../../lib/indicators/types';
-import { PatternSignal } from '../../lib/indicators/patternRecognition';
-import { getPatternName } from '../../lib/indicators/patternRecognition';
+import type { ScalpDisplayItem } from '../../lib/indicators/scalpSignal';
 
 interface UnifiedMarkerManagerProps {
   candleSeries: ISeriesApi<'Candlestick'> | null;
   semaforPoints: SemaforPoint[];
-  patternSignals: PatternSignal[];
+  scalpSignals: ScalpDisplayItem[];
   showSemafor: boolean;
-  showPatternRecognition: boolean;
+  showScalp: boolean;
 }
 
 /**
  * Unified Marker Manager
- * 
- * Merges markers from multiple indicators to prevent rendering conflicts.
- * When both Semafor and Pattern Recognition are enabled, this component
- * combines their markers into a single setMarkers() call.
+ *
+ * Merges markers from Semafor and Scalp Signal into a single setMarkers() call.
  */
 export default function UnifiedMarkerManager({
   candleSeries,
   semaforPoints,
-  patternSignals,
+  scalpSignals,
   showSemafor,
-  showPatternRecognition,
+  showScalp,
 }: UnifiedMarkerManagerProps) {
   const markersRef = useRef<any[]>([]);
 
@@ -37,7 +34,7 @@ export default function UnifiedMarkerManager({
       time: any;
       position: 'aboveBar' | 'belowBar' | 'inBar';
       color: string;
-      shape: 'circle' | 'arrowUp' | 'arrowDown';
+      shape: 'circle' | 'arrowUp' | 'arrowDown' | 'square';
       size: number;
       text?: string;
     }> = [];
@@ -97,44 +94,42 @@ export default function UnifiedMarkerManager({
       }
     }
 
-    // ──── PATTERN RECOGNITION MARKERS ────
-    if (showPatternRecognition && patternSignals && patternSignals.length > 0) {
-      for (const pattern of patternSignals) {
-        const isBullish = pattern.direction === 'UP';
-        const color = isBullish ? '#00ff66' : '#ff4400';
-        const arrowColor = isBullish ? '#80ffbb' : '#ff9999';
+    // ──── SCALP SIGNAL MARKERS (white circle + arrow; WAIT = grey circle) ────
+    if (showScalp && scalpSignals && scalpSignals.length > 0) {
+      for (const item of scalpSignals) {
+        if (item.signal === 'LONG' || item.signal === 'SHORT') {
+          const isBuy = item.signal === 'LONG';
+          const rsiText = item.rsi != null ? `RSI: ${item.rsi.toFixed(0)}` : '';
+          const tp2Text = `TP2: ${item.takeProfit2.toFixed(0)}`;
+          const slText = `SL: ${item.stopLoss.toFixed(0)}`;
+          const label = `Scalp ${item.signal}${rsiText ? ` | ${rsiText}` : ''} | ${tp2Text} | ${slText}`;
 
-        // Main pattern signal marker at completion point
-        allMarkers.push({
-          time: pattern.time as any,
-          position: isBullish ? 'belowBar' : 'aboveBar',
-          color,
-          shape: 'circle',
-          size: 3.5, // Slightly larger than Semafor to distinguish
-          text: `${getPatternName(pattern.type)} (${pattern.confidence}%)`,
-        });
-
-        // Directional arrow
-        allMarkers.push({
-          time: pattern.time as any,
-          position: isBullish ? 'belowBar' : 'aboveBar',
-          color: arrowColor,
-          shape: isBullish ? 'arrowUp' : 'arrowDown',
-          size: 2.5,
-        });
-
-        // Mark pattern points (lows/highs that form the pattern)
-        for (const point of pattern.patternPoints) {
-          const isHigh = point.label.includes('High') || 
-                        point.label.includes('Shoulder') || 
-                        point.label.includes('Head');
           allMarkers.push({
-            time: point.time as any,
-            position: isHigh ? 'aboveBar' : 'belowBar',
-            color: isBullish ? '#00cc0080' : '#ff440080', // Semi-transparent
+            time: item.time as any,
+            position: isBuy ? 'belowBar' : 'aboveBar',
+            color: '#FFFFFF',
             shape: 'circle',
-            size: 1.5,
-            text: point.label,
+            size: 2.5,
+            text: label,
+          });
+
+          const arrowColor = isBuy ? '#4CAF50' : '#F44336';
+          allMarkers.push({
+            time: item.time as any,
+            position: isBuy ? 'belowBar' : 'aboveBar',
+            color: arrowColor,
+            shape: isBuy ? 'arrowUp' : 'arrowDown',
+            size: 2.0,
+          });
+        } else {
+          // WAIT: show one grey circle so the indicator is visible
+          allMarkers.push({
+            time: item.time as any,
+            position: 'belowBar',
+            color: '#888888',
+            shape: 'circle',
+            size: 2.0,
+            text: `Scalp: WAIT (${item.reason})`,
           });
         }
       }
@@ -142,7 +137,7 @@ export default function UnifiedMarkerManager({
 
     // Sort all markers: time → position → shape
     const posOrder = { 'aboveBar': 0, 'inBar': 1, 'belowBar': 2 };
-    const shapeOrder = { 'circle': 0, 'arrowDown': 1, 'arrowUp': 1 };
+    const shapeOrder = { 'circle': 0, 'square': 1, 'arrowDown': 2, 'arrowUp': 2 };
     
     allMarkers.sort((a, b) => {
       if (a.time !== b.time) return a.time - b.time;
@@ -161,7 +156,7 @@ export default function UnifiedMarkerManager({
     } catch (error) {
       console.error('Unified marker error:', error);
     }
-  }, [candleSeries, semaforPoints, patternSignals, showSemafor, showPatternRecognition]);
+  }, [candleSeries, semaforPoints, scalpSignals, showSemafor, showScalp]);
 
   return null;
 }

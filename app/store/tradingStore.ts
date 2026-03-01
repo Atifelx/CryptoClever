@@ -105,10 +105,6 @@ interface TradingState {
 // Backend-driven symbols: BTC, ETH, SOL, BNB, XRP only; fallback when backend unavailable
 export const BACKEND_SYMBOLS_FALLBACK: TradingPair[] = [
   { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', name: 'BTC/USDT', displayName: 'Bitcoin' },
-  { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', name: 'ETH/USDT', displayName: 'Ethereum' },
-  { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', name: 'SOL/USDT', displayName: 'Solana' },
-  { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', name: 'BNB/USDT', displayName: 'BNB' },
-  { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', name: 'XRP/USDT', displayName: 'XRP' },
 ];
 
 export const SYMBOL_DISPLAY: Record<string, { name: string; base: string }> = Object.fromEntries(

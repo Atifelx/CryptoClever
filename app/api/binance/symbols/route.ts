@@ -9,10 +9,6 @@ import { getCachedCryptoLogo, cacheCryptoLogo } from '../../../lib/redis';
 async function preCacheCuratedIcons() {
   const curatedPairs = [
     { symbol: 'BTCUSDT', base: 'BTC' },
-    { symbol: 'ETHUSDT', base: 'ETH' },
-    { symbol: 'SOLUSDT', base: 'SOL' },
-    { symbol: 'BNBUSDT', base: 'BNB' },
-    { symbol: 'XRPUSDT', base: 'XRP' },
   ];
 
   // Pre-cache all 5 icons in parallel

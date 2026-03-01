@@ -26,15 +26,15 @@ export const INDICATOR_REGISTRY: Record<string, IndicatorConfig> = {
     hasSettings: true,
     icon: '🔴',
   },
-  // Pattern Recognition
-  patternRecognition: {
-    id: 'patternRecognition',
-    name: 'Pattern Recognition',
+  // Scalp Signal Indicator
+  scalpSignal: {
+    id: 'scalpSignal',
+    name: 'Scalp Signal',
     category: 'support-resistance',
-    description: 'Detects chart patterns: Double Bottom/Top, Head & Shoulders, Triangles',
+    description: 'EMA + Supertrend + RSI + VWAP scalp entries (13:00–22:00 UTC, volume confirmation)',
     defaultEnabled: false,
     hasSettings: true,
-    icon: '📊',
+    icon: '⚡',
   },
 };
 

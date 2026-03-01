@@ -11,7 +11,6 @@ import websockets
 from app.config import (
     BINANCE_REST_BASE,
     BINANCE_WS_BASE,
-    INTERVALS,
     SYMBOLS,
 )
 from app.redis_store import append_candle, set_candles, get_candles
@@ -122,32 +121,31 @@ async def fetch_klines_range(
 
 
 async def bootstrap_all() -> None:
-    """Bootstrap all symbol/interval combinations."""
-    logger.info("[BOOTSTRAP_START] Symbols=%s | Intervals=%s", SYMBOLS, INTERVALS)
+    """Bootstrap history for all symbols, 1m interval only."""
+    BOOTSTRAP_INTERVAL = "1m"
+    logger.info("[BOOTSTRAP_START] Symbols=%s | Interval=%s (1m only)", SYMBOLS, BOOTSTRAP_INTERVAL)
     tasks = [
-        bootstrap_symbol_interval(sym, iv)
+        bootstrap_symbol_interval(sym, BOOTSTRAP_INTERVAL)
         for sym in SYMBOLS
-        for iv in INTERVALS
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
     for sym in SYMBOLS:
-        for iv in INTERVALS:
-            try:
-                stored = await get_candles(sym, iv, 5)
-                last_close = stored[-1].get("close") if stored else "EMPTY"
-                logger.info("[BOOTSTRAP_VERIFY] Symbol=%s | Interval=%s | StoredCount=%d | LastClose=%s", sym, iv, len(stored), last_close)
-            except Exception as e:
-                logger.error("[BOOTSTRAP_ERROR] Symbol=%s | Interval=%s | Error=%s", sym, iv, e)
+        try:
+            stored = await get_candles(sym, BOOTSTRAP_INTERVAL, 5)
+            last_close = stored[-1].get("close") if stored else "EMPTY"
+            logger.info("[BOOTSTRAP_VERIFY] Symbol=%s | Interval=%s | StoredCount=%d | LastClose=%s", sym, BOOTSTRAP_INTERVAL, len(stored), last_close)
+        except Exception as e:
+            logger.error("[BOOTSTRAP_ERROR] Symbol=%s | Interval=%s | Error=%s", sym, BOOTSTRAP_INTERVAL, e)
     logger.info("[BOOTSTRAP_COMPLETE]")
 
 
 def _build_streams() -> str:
-    # Combined stream: stream1/stream2/stream3
+    """Build combined stream path: only 1m klines per symbol (live WS). Other intervals still bootstrapped via REST."""
+    WS_INTERVAL = "1m"
     parts = []
     for sym in SYMBOLS:
         s = sym.lower()
-        for iv in INTERVALS:
-            parts.append(f"{s}@kline_{iv}")
+        parts.append(f"{s}@kline_{WS_INTERVAL}")
     return "/".join(parts)
 
 
@@ -166,7 +164,7 @@ async def run_binance_ws() -> None:
             async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
                 _binance_ws_connected = True
                 try:
-                    logger.info("[BINANCE_COMBINED] Connected to %d streams", len(SYMBOLS) * len(INTERVALS))
+                    logger.info("[BINANCE_COMBINED] Connected to %d streams (1m only)", len(SYMBOLS))
                     async for message in ws:
                         stream = ""
                         try:

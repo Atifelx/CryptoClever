@@ -15,7 +15,7 @@ import { useBackendCandlesLoader } from './hooks/useBackendCandlesLoader';
 import { INDICATOR_REGISTRY } from './lib/indicators/registry';
 import { SemaforPoint } from './lib/indicators/types';
 import type { SemaforTrend } from './lib/indicators/semafor';
-import { PatternSignal } from './lib/indicators/patternRecognition';
+import type { ScalpDisplayItem } from './lib/indicators/scalpSignal';
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
@@ -54,6 +54,16 @@ export default function Home() {
             localStorage.setItem('enabled-indicators', JSON.stringify(validIds));
           }
         }
+      } else {
+        // No saved preferences - use registry defaults
+        const defaultSet = new Set<string>();
+        Object.values(INDICATOR_REGISTRY).forEach(ind => {
+          if (ind.defaultEnabled) {
+            defaultSet.add(ind.id);
+          }
+        });
+        setEnabledIndicators(defaultSet);
+        localStorage.setItem('enabled-indicators', JSON.stringify(Array.from(defaultSet)));
       }
     } catch (e) {
       console.warn('Error loading indicator preferences:', e);
@@ -86,10 +96,14 @@ export default function Home() {
     semaforPoints: SemaforPoint[];
     semaforTrend: SemaforTrend;
     patternSignals: PatternSignal[];
+    phoenixSignals: PhoenixSignal[];
+    scalpSignals: ScalpDisplayItem[];
   }>({
     semaforPoints: [],
     semaforTrend: { trend: 'NEUTRAL', ema20: 0, ema50: 0 },
     patternSignals: [],
+    phoenixSignals: [],
+    scalpSignals: [],
   });
 
   // Use safe defaults during SSR
@@ -131,7 +145,6 @@ export default function Home() {
             enabledIndicators={enabledIndicators}
             semaforPoints={indicatorData.semaforPoints}
             semaforTrend={indicatorData.semaforTrend}
-            patternSignals={indicatorData.patternSignals}
           />
         </div>
 
@@ -140,7 +153,8 @@ export default function Home() {
 
         {/* Chart */}
         <div key={`chart-${safeSymbol}-${safeTimeframe}`} className="flex-1 p-4 min-h-0">
-          <TradingChart 
+          <TradingChart
+            key={`tradingview-${safeSymbol}-${safeTimeframe}`}
             symbol={safeSymbol}
             interval={safeTimeframe}
             enabledIndicators={enabledIndicators}

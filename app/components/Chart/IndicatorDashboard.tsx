@@ -2,20 +2,17 @@
 
 import { SemaforPoint } from '../../lib/indicators/types';
 import type { SemaforTrend } from '../../lib/indicators/semafor';
-import { PatternSignal } from '../../lib/indicators/patternRecognition';
 
 interface IndicatorDashboardProps {
   enabledIndicators: Set<string>;
   semaforPoints: SemaforPoint[];
   semaforTrend: SemaforTrend;
-  patternSignals: PatternSignal[];
 }
 
 export default function IndicatorDashboard({
   enabledIndicators,
   semaforPoints,
   semaforTrend,
-  patternSignals,
 }: IndicatorDashboardProps) {
   const isEnabled = (id: string) => enabledIndicators.has(id);
 
@@ -39,31 +36,6 @@ export default function IndicatorDashboard({
             <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-[10px]">
               📍
             </span>
-          )}
-        </div>
-      )}
-
-      {isEnabled('patternRecognition') && (
-        <div className="bg-[#1a1a1a] border border-gray-800 rounded px-3 py-1.5 flex items-center gap-2">
-          <span className="text-white font-semibold text-xs">Pattern Recognition</span>
-          <span className="px-1.5 py-0.5 bg-purple-600/20 text-purple-400 text-[10px] rounded">ON</span>
-          {patternSignals.length > 0 ? (
-            <>
-              <span className={`text-xs font-semibold ${
-                patternSignals[0].direction === 'UP' ? 'text-green-400' : 'text-red-400'
-              }`}>
-                {patternSignals[0].description.split(' - ')[0]}
-              </span>
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                patternSignals[0].confidence >= 80 ? 'bg-green-600/20 text-green-400' :
-                patternSignals[0].confidence >= 60 ? 'bg-yellow-600/20 text-yellow-400' :
-                'bg-gray-600/20 text-gray-400'
-              }`}>
-                {patternSignals[0].confidence}%
-              </span>
-            </>
-          ) : (
-            <span className="text-[10px] text-gray-500">No patterns</span>
           )}
         </div>
       )}

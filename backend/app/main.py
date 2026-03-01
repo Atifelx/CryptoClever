@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException, WebSocket
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
@@ -165,17 +165,158 @@ async def chart_demo():
     return HTMLResponse("<p>chart_demo.html not found</p>", status_code=404)
 
 
+# --- Test page: history + live URLs (1m only) ---
+TEST_CANDLES_HTML = """<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Test History + Live (1m)</title>
+  <style>
+    body { font-family: system-ui; background: #0f0f0f; color: #e0e0e0; padding: 20px; max-width: 900px; }
+    h1 { font-size: 1.25rem; }
+    section { margin: 1.5rem 0; padding: 1rem; background: #1a1a1a; border-radius: 8px; }
+    code { background: #2a2a2a; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+    .url { word-break: break-all; margin: 0.25rem 0; }
+    button { padding: 8px 14px; margin: 4px 8px 4px 0; background: #26a69a; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #log { font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; background: #111; padding: 10px; border-radius: 6px; white-space: pre-wrap; }
+    .ok { color: #4ade80; }
+    .err { color: #f87171; }
+    select { padding: 6px 10px; margin-right: 8px; background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Test History + Live (1m) – URLs this app uses</h1>
+
+  <section>
+    <h2>Existing URLs (our app)</h2>
+    <p><strong>History (REST, 1m, 12h = 720 candles):</strong></p>
+    <p class="url"><code id="url-history">/api/historical/BTCUSDT?interval=1m&hours=12</code></p>
+    <p><strong>Live (WebSocket, 1m):</strong></p>
+    <p class="url"><code id="url-ws">/ws/BTCUSDT</code></p>
+    <p><strong>Binance URL (backend subscribes to, BTC 1m only):</strong></p>
+    <p class="url"><code>wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m</code></p>
+  </section>
+
+  <section>
+    <h2>Test in browser</h2>
+    <p>
+      Symbol: <select id="symbol"><option value="BTCUSDT">BTCUSDT (1m only)</option></select>
+      <button id="btn-history">Test history (REST)</button>
+      <button id="btn-live">Test live (WebSocket)</button>
+      <button id="btn-stop">Stop WebSocket</button>
+    </p>
+    <p><strong>Log:</strong></p>
+    <div id="log"></div>
+  </section>
+
+  <script>
+    const base = window.location.origin;
+    const logEl = document.getElementById('log');
+    const symbolEl = document.getElementById('symbol');
+    function log(msg, isErr) {
+      const line = document.createElement('div');
+      line.className = isErr ? 'err' : 'ok';
+      line.textContent = new Date().toISOString().slice(11, 23) + ' ' + msg;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setUrlHistory() {
+      const s = symbolEl.value;
+      document.getElementById('url-history').textContent = base + '/api/historical/' + s + '?interval=1m&hours=12';
+    }
+    function setUrlWs() {
+      document.getElementById('url-ws').textContent = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws/' + symbolEl.value;
+    }
+    symbolEl.addEventListener('change', function() { setUrlHistory(); setUrlWs(); });
+    setUrlHistory();
+    setUrlWs();
+
+    document.getElementById('btn-history').onclick = async function() {
+      const symbol = symbolEl.value;
+      const url = base + '/api/historical/' + encodeURIComponent(symbol) + '?interval=1m&hours=12';
+      log('Fetching: ' + url);
+      try {
+        const r = await fetch(url);
+        const data = await r.json();
+        log('History OK: ' + (data.count || 0) + ' candles, last close=' + (data.data && data.data.length ? data.data[data.data.length - 1].close : 'n/a'));
+      } catch (e) {
+        log('History FAIL: ' + e.message, true);
+      }
+    };
+
+    let ws = null;
+    document.getElementById('btn-live').onclick = function() {
+      if (ws && ws.readyState === WebSocket.OPEN) { log('WebSocket already open'); return; }
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = proto + '//' + window.location.host + '/ws/' + symbolEl.value;
+      log('Connecting: ' + url);
+      ws = new WebSocket(url);
+      ws.onopen = () => log('WebSocket connected');
+      ws.onmessage = function(e) {
+        const d = JSON.parse(e.data);
+        if (d.type === 'historical') log('Live: historical ' + (d.data ? d.data.length : 0) + ' candles');
+        else if (d.type === 'live_candle') log('Live: candle t=' + d.time + ' c=' + d.close);
+        else log('Live: ' + (d.type || 'message'));
+      };
+      ws.onerror = () => log('WebSocket error', true);
+      ws.onclose = (e) => { log('WebSocket closed ' + e.code); ws = null; }
+    };
+    document.getElementById('btn-stop').onclick = function() {
+      if (ws) { ws.close(); ws = null; log('WebSocket closed by user'); }
+    };
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/test/candles/urls")
+async def test_candles_urls(request: Request):
+    """Return JSON of the history and live URLs the app uses (1m). For scripts or browser."""
+    base = str(request.base_url).rstrip("/")
+    base_ws = base.replace("http://", "ws://").replace("https://", "wss://")
+    return {
+        "history_rest": {
+            "description": "History (1m, 12h = 720 candles) – same as app",
+            "url_template": base + "/api/historical/{symbol}?interval=1m&hours=12",
+            "example": base + "/api/historical/BTCUSDT?interval=1m&hours=12",
+        },
+        "live_websocket": {
+            "description": "Live (1m) – same as app",
+            "url_template": base_ws + "/ws/{symbol}",
+            "example": base_ws + "/ws/BTCUSDT",
+        },
+        "binance_ws_backend_subscribes": {
+            "description": "Binance URL backend uses (BTC 1m only)",
+            "url": "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m",
+        },
+        "symbols": list(SYMBOLS),
+    }
+
+
+@app.get("/test/candles", response_class=HTMLResponse)
+async def test_candles_page():
+    """Single endpoint to test history + live in browser. Uses same URLs as the app (1m)."""
+    return TEST_CANDLES_HTML
+
+
 # Interval to seconds for historical limit calculation
 _HISTORICAL_INTERVAL_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400, "6h": 21600, "8h": 28800, "12h": 43200, "1d": 86400, "3d": 259200, "1w": 604800}
 
 
 @app.get("/api/historical/{symbol}")
 async def api_historical(symbol: str, interval: str = "1m", hours: int = 12):
-    """Proposal API: historical candles (time in ms, is_closed true). Uses store; interval and hours determine limit."""
+    """Proposal API: historical candles (time in ms, is_closed true). BTC 1m only."""
     symbol = normalize_symbol(symbol)
     interval = normalize_interval(interval)
-    if symbol not in SYMBOLS:
-        raise HTTPException(status_code=404, detail=f"Symbol {symbol} not supported")
+    
+    # VALIDATION: Only BTCUSDT 1m supported
+    if symbol != "BTCUSDT":
+        raise HTTPException(status_code=400, detail=f"Only BTCUSDT is supported. Requested: {symbol}")
+    if interval != "1m":
+        raise HTTPException(status_code=400, detail=f"Only 1m interval is supported. Requested: {interval}")
+    
     interval_sec = _HISTORICAL_INTERVAL_SECONDS.get(interval, 60)
     limit = min(1000, max(1, int(hours * 3600 / interval_sec)))
     candles = await get_candles(symbol, interval, limit=limit)
@@ -818,14 +959,17 @@ async def verify_live():
 async def websocket_proposal(websocket: WebSocket, symbol: str):
     """
     Proposal API: on connect send historical (type 'historical') then stream live_candle.
-    Client receives one 'historical' message with data array (time ms, is_closed true), then 'live_candle' messages.
+    BTC 1m only.
     """
     symbol = normalize_symbol(symbol)
     await websocket.accept()
-    if symbol not in SYMBOLS:
-        await websocket.send_json({"type": "error", "message": f"Symbol {symbol} not supported"})
+    
+    # VALIDATION: Only BTCUSDT supported
+    if symbol != "BTCUSDT":
+        await websocket.send_json({"type": "error", "message": f"Only BTCUSDT is supported. Requested: {symbol}"})
         await websocket.close(code=4000)
         return
+    
     try:
         candles = await get_candles(symbol, "1m", limit=720)
         data = [
@@ -915,10 +1059,22 @@ async def candles(symbol: str, interval: str, limit: int = 500):
     print(f"[FRONTEND_REQUEST] Raw symbol from URL path: '{symbol}'", file=sys.stderr)
     print(f"[FRONTEND_REQUEST] Raw interval from URL path: '{interval}'", file=sys.stderr)
     print(f"[FRONTEND_REQUEST] Limit: {limit}", file=sys.stderr)
+    
+    # VALIDATION: Only BTCUSDT 1m supported
     if limit < 1 or limit > 1000:
         limit = 500
     symbol_normalized = normalize_symbol(symbol)
     interval_normalized = normalize_interval(interval)
+    
+    # Enforce BTC 1m only
+    if symbol_normalized != "BTCUSDT":
+        print(f"[REJECTED] Symbol '{symbol_normalized}' not supported. Only BTCUSDT allowed.", file=sys.stderr)
+        raise HTTPException(status_code=400, detail=f"Only BTCUSDT is supported. Requested: {symbol_normalized}")
+    
+    if interval_normalized != "1m":
+        print(f"[REJECTED] Interval '{interval_normalized}' not supported. Only 1m allowed.", file=sys.stderr)
+        raise HTTPException(status_code=400, detail=f"Only 1m interval is supported. Requested: {interval_normalized}")
+    
     print(f"[NORMALIZED] Symbol: '{symbol_normalized}' | Interval: '{interval_normalized}'", file=sys.stderr)
     key = build_candle_key(symbol_normalized, interval_normalized)
     print(f"[KEY] Store key: '{key}'", file=sys.stderr)

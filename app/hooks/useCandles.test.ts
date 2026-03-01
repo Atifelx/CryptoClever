@@ -159,3 +159,9 @@ export function useCandlesDebug(symbol: string) {
 
   return { candles, isConnected };
 }
+
+describe('useCandlesDebug', () => {
+  it('exports a function', () => {
+    expect(typeof useCandlesDebug).toBe('function');
+  });
+});

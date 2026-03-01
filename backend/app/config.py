@@ -5,17 +5,17 @@ from dotenv import load_dotenv
 # Load .env from backend directory so DATABASE_URL etc. can override defaults
 load_dotenv()
 
-# Curated symbols: BTC, ETH, SOL, BNB, XRP only (Binance format)
+# Only BTC 1m - Reduced server workload
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+    "BTCUSDT",
 ]
 
-# Multiple intervals for live stream and REST (TradingView-style). Binance supports: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w
-INTERVALS = ["1m", "5m", "15m", "1h", "1d"]
+# Only 1m interval for minimal server load
+INTERVALS = ["1m"]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # Set to "1" or "true" to use in-memory store instead of Redis (no Redis needed for local testing)
-USE_MEMORY_STORE = os.getenv("USE_MEMORY_STORE", "").lower() in ("1", "true", "yes")
+USE_MEMORY_STORE = os.getenv("USE_MEMORY_STORE", "true").lower() in ("1", "true", "yes")
 BUFFER_SIZE = 1000  # Max candles per symbol/interval in Redis
 
 # Binance WebSocket base URL
