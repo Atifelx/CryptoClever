@@ -5,15 +5,19 @@ import { ISeriesApi } from 'lightweight-charts';
 import { SemaforPoint } from '../../lib/indicators/types';
 import type { ScalpDisplayItem } from '../../lib/indicators/scalpSignal';
 import type { TrendMarker } from '../../lib/indicators/trendIndicator';
+import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
 
 interface UnifiedMarkerManagerProps {
   candleSeries: ISeriesApi<'Candlestick'> | null;
   semaforPoints: SemaforPoint[];
   scalpSignals: ScalpDisplayItem[];
   trendMarker: TrendMarker | null;
+  fmcbrSignal: FMCBRSignal | null;
+  currentCandleTime?: number; // Current candle time for FMCBR markers
   showSemafor: boolean;
   showScalp: boolean;
   showTrend: boolean;
+  showFMCBR: boolean;
 }
 
 /**
@@ -26,9 +30,12 @@ export default function UnifiedMarkerManager({
   semaforPoints,
   scalpSignals,
   trendMarker,
+  fmcbrSignal,
+  currentCandleTime,
   showSemafor,
   showScalp,
   showTrend,
+  showFMCBR,
 }: UnifiedMarkerManagerProps) {
   const markersRef = useRef<any[]>([]);
 
@@ -211,7 +218,7 @@ export default function UnifiedMarkerManager({
     } catch (error) {
       console.error('Unified marker error:', error);
     }
-  }, [candleSeries, semaforPoints, scalpSignals, trendMarker, showSemafor, showScalp, showTrend]);
+  }, [candleSeries, semaforPoints, scalpSignals, trendMarker, fmcbrSignal, currentCandleTime, showSemafor, showScalp, showTrend, showFMCBR]);
 
   return null;
 }
