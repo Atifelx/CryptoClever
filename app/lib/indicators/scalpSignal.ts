@@ -240,18 +240,12 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     return { signal: 'WAIT', reason: 'Choppy market - EMAs tangled' };
   }
 
-  // Volume surge: require > 1.5× MA (relaxed from 2× so signals appear more often)
-  const volumeSurge = currentVolumeMA > 0 && currentVolume > currentVolumeMA * 1.5;
-
-  if (!volumeSurge) {
-    return {
-      signal: 'WAIT',
-      reason: 'No volume confirmation',
-      marketState: isBullishTrend ? 'BULLISH_TREND' : 'BEARISH_TREND',
-      rsi: currentRSI,
-      volume: 'NORMAL',
-    };
-  }
+  // Volume confirmation: relaxed thresholds
+  // Strong surge: > 1.2× MA (for high confidence)
+  // Moderate: > 0.9× MA (acceptable if other conditions are strong)
+  const volumeSurgeStrong = currentVolumeMA > 0 && currentVolume > currentVolumeMA * 1.2;
+  const volumeSurgeModerate = currentVolumeMA > 0 && currentVolume > currentVolumeMA * 0.9;
+  const volumeSurge = volumeSurgeStrong; // For backward compatibility
 
   // LONG
   if (isBullishTrend) {
@@ -260,21 +254,25 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     const condition3 = currentRSI > 50 && currentRSI < 75;
     const condition4 = currentClose >= currentVWAP * 0.998;
     const condition5 = currentClose > currentOpen;
-    const condition6 = volumeSurge;
+    // Volume: accept if strong surge OR (moderate + all other conditions perfect)
+    const condition6 = volumeSurgeStrong || (volumeSurgeModerate && condition1 && condition2 && condition3 && condition4 && condition5);
 
     if (condition1 && condition2 && condition3 && condition4 && condition5 && condition6) {
       const stopLoss = currentSupertrend.value;
       const takeProfit1 = currentClose * 1.002;
       const takeProfit2 = currentClose * 1.003;
 
+      // Adjust confidence based on volume strength
+      const confidence = volumeSurgeStrong ? 85 : 75;
+      
       return {
         signal: 'LONG',
         entry: currentClose,
         stopLoss,
         takeProfit1,
         takeProfit2,
-        confidence: 85,
-        reason: 'All bullish conditions met',
+        confidence,
+        reason: volumeSurgeStrong ? 'All bullish conditions met' : 'Bullish trend with moderate volume',
       };
     }
   }
@@ -286,23 +284,39 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     const condition3 = currentRSI < 50 && currentRSI > 25;
     const condition4 = currentClose <= currentVWAP * 1.002;
     const condition5 = currentClose < currentOpen;
-    const condition6 = volumeSurge;
+    // Volume: accept if strong surge OR (moderate + all other conditions perfect)
+    const condition6 = volumeSurgeStrong || (volumeSurgeModerate && condition1 && condition2 && condition3 && condition4 && condition5);
 
     if (condition1 && condition2 && condition3 && condition4 && condition5 && condition6) {
       const stopLoss = currentSupertrend.value;
       const takeProfit1 = currentClose * 0.998;
       const takeProfit2 = currentClose * 0.997;
 
+      // Adjust confidence based on volume strength
+      const confidence = volumeSurgeStrong ? 85 : 75;
+      
       return {
         signal: 'SHORT',
         entry: currentClose,
         stopLoss,
         takeProfit1,
         takeProfit2,
-        confidence: 85,
-        reason: 'All bearish conditions met',
+        confidence,
+        reason: volumeSurgeStrong ? 'All bearish conditions met' : 'Bearish trend with moderate volume',
       };
     }
+  }
+
+  // If we have a clear trend but volume is too low, provide more helpful feedback
+  if ((isBullishTrend || isBearishTrend) && !volumeSurgeModerate) {
+    const volumeRatio = currentVolumeMA > 0 ? (currentVolume / currentVolumeMA).toFixed(2) : '0';
+    return {
+      signal: 'WAIT',
+      reason: `Low volume (${volumeRatio}x avg) - need >0.9x`,
+      marketState: isBullishTrend ? 'BULLISH_TREND' : 'BEARISH_TREND',
+      rsi: currentRSI,
+      volume: 'LOW',
+    };
   }
 
   return {
@@ -310,7 +324,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     reason: 'Conditions not fully met',
     marketState: isBullishTrend ? 'BULLISH_TREND' : 'BEARISH_TREND',
     rsi: currentRSI,
-    volume: volumeSurge ? 'SURGE' : 'NORMAL',
+    volume: volumeSurgeStrong ? 'SURGE' : volumeSurgeModerate ? 'MODERATE' : 'NORMAL',
   };
 }
 
