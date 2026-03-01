@@ -148,10 +148,22 @@ export default function TradingChart({
   // FMCBR Core Engine — Official FMCBR 3.0 Algorithm
   const fmcbrSignal = useMemo((): FMCBRSignal | null => {
     if (typeof window === 'undefined') return null;
-    if (isLoading || candles.length < 50) return null; // need at least 50 candles
+    if (isLoading || candles.length < 50) {
+      console.log('[FMCBR] Not calculating - isLoading:', isLoading, 'candles:', candles.length);
+      return null;
+    }
 
     try {
-      return calculateFMCBR(candles);
+      const signal = calculateFMCBR(candles);
+      console.log('[FMCBR] Calculated signal:', {
+        status: signal?.status,
+        breakType: signal?.breakType,
+        direction: signal?.direction,
+        cb1: signal?.cb1,
+        levelsCount: signal?.levels?.length || 0,
+        hasLevels: signal?.levels && signal.levels.length > 0,
+      });
+      return signal;
     } catch (error) {
       console.error('[FMCBR] Calculation error:', error);
       return null;

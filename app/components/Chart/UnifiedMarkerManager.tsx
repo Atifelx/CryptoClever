@@ -200,6 +200,14 @@ export default function UnifiedMarkerManager({
     // ──── FMCBR CORE ENGINE MARKERS (render levels as circles like Semafor) ────
     // Show markers even when not READY, but with different visuals
     if (showFMCBR && fmcbrSignal) {
+      console.log('[FMCBR Markers] Rendering markers:', {
+        showFMCBR,
+        hasSignal: !!fmcbrSignal,
+        status: fmcbrSignal.status,
+        levelsCount: fmcbrSignal.levels?.length || 0,
+        breakType: fmcbrSignal.breakType,
+        direction: fmcbrSignal.direction,
+      });
       const { levels, direction, breakType, cb1 } = fmcbrSignal;
       
       // Color scheme
