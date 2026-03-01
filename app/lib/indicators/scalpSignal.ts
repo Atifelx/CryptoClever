@@ -349,8 +349,8 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const TAKE_PROFIT_PCT = 0.008; // 0.8%
   const STOP_LOSS_PCT = 0.004; // 0.4%
 
-  // RELAXED THRESHOLD: Require 4/6 conditions (was 5/6) OR strong momentum OR BB mean reversion
-  if (longScore >= 4 || bbLong || strongMomentumLong) {
+  // RELAXED THRESHOLD: Require 4/6 conditions (was 5/6) OR strong momentum OR BB mean reversion OR swing reversal
+  if (longScore >= 4 || bbLong || strongMomentumLong || swingReversalLong) {
     // LONG signal
     const stopLoss = currentClose * (1 - STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 + TAKE_PROFIT_PCT);
@@ -382,7 +382,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       rsi: currentRSI,
       volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.0 ? 'MODERATE' : 'NORMAL',
     };
-  } else if (shortScore >= 4 || bbShort || strongMomentumShort) {
+  } else if (shortScore >= 4 || bbShort || strongMomentumShort || swingReversalShort) {
     // SHORT signal
     const stopLoss = currentClose * (1 + STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 - TAKE_PROFIT_PCT);
@@ -391,6 +391,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     // Calculate confidence based on conditions met
     let confidence = 70;
     if (shortScore >= 6) confidence = 90;
+    else if (swingReversalShort) confidence = 80; // Swing reversal (fast signal)
     else if (strongMomentumShort) confidence = 85; // Strong momentum
     else if (bbShort) confidence = 75; // BB mean reversion
     else if (shortScore >= 5) confidence = 80;
