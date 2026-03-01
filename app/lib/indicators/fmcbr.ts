@@ -337,9 +337,9 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
     let breakIndex = -1;
     
     for (let i = Math.max(0, candles.length - 20); i < candles.length - 1; i++) {
-      const break = detectBreak(candles, i);
-      if (break) {
-        breakType = break;
+      const detectedBreak = detectBreak(candles, i);
+      if (detectedBreak) {
+        breakType = detectedBreak;
         breakIndex = i;
         break;
       }
