@@ -22,22 +22,11 @@ export default function FMCBROverlay({
   const priceLinesRef = useRef<IPriceLine[]>([]);
 
   useEffect(() => {
-    if (!candleSeries || !showFMCBR || !signal || signal.status !== 'READY') {
-      // Clear all lines if series, signal not available, or not ready
-      if (candleSeries && priceLinesRef.current.length > 0) {
-        priceLinesRef.current.forEach(line => {
-          try {
-            candleSeries.removePriceLine(line);
-          } catch (e) {
-            // Ignore errors during cleanup
-          }
-        });
-        priceLinesRef.current = [];
-      }
+    if (!candleSeries) {
       return;
     }
 
-    // Clear existing lines
+    // Clear existing lines first
     priceLinesRef.current.forEach(line => {
       try {
         candleSeries.removePriceLine(line);
@@ -46,6 +35,11 @@ export default function FMCBROverlay({
       }
     });
     priceLinesRef.current = [];
+
+    // Only render if enabled and signal is ready
+    if (!showFMCBR || !signal || signal.status !== 'READY') {
+      return;
+    }
 
     const { levels, direction, breakType, cb1 } = signal;
 
@@ -97,18 +91,35 @@ export default function FMCBROverlay({
         title = level.label;
       }
 
-      const line = candleSeries.createPriceLine({
-        price: level.price,
-        color,
-        lineWidth,
-        lineStyle,
-        axisLabelVisible: true,
-        title,
-      });
-      
-      priceLinesRef.current.push(line);
+      try {
+        const line = candleSeries.createPriceLine({
+          price: level.price,
+          color,
+          lineWidth,
+          lineStyle,
+          axisLabelVisible: true,
+          title,
+        });
+        
+        priceLinesRef.current.push(line);
+      } catch (error) {
+        console.error(`[FMCBR] Error creating price line for ${level.label}:`, error);
+      }
     });
 
+    return () => {
+      // Cleanup on unmount or when dependencies change
+      if (candleSeries) {
+        priceLinesRef.current.forEach(line => {
+          try {
+            candleSeries.removePriceLine(line);
+          } catch (e) {
+            // Ignore errors during cleanup
+          }
+        });
+        priceLinesRef.current = [];
+      }
+    };
   }, [candleSeries, signal, showFMCBR]);
 
   return null;
