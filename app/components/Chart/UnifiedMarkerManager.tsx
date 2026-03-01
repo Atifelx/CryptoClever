@@ -198,7 +198,8 @@ export default function UnifiedMarkerManager({
     }
 
     // ──── FMCBR CORE ENGINE MARKERS (render levels as circles like Semafor) ────
-    if (showFMCBR && fmcbrSignal && fmcbrSignal.status === 'READY') {
+    // Show markers even when not READY, but with different visuals
+    if (showFMCBR && fmcbrSignal) {
       const { levels, direction, breakType, cb1 } = fmcbrSignal;
       
       // Color scheme
@@ -234,8 +235,23 @@ export default function UnifiedMarkerManager({
       
       // If no reference time, skip rendering (will render when candles are available)
       if (referenceTime !== null) {
-        // Render each level as a circle marker
-        levels.forEach(level => {
+        // Render status indicator first
+        const statusColor = fmcbrSignal.status === 'READY' ? '#00ff66' : 
+                           fmcbrSignal.status === 'WAITING_CB1' ? '#ffaa00' :
+                           fmcbrSignal.status === 'WAITING_RETEST' ? '#ff6600' : '#888888';
+        
+        allMarkers.push({
+          time: referenceTime as any,
+          position: 'inBar',
+          color: statusColor,
+          shape: 'circle',
+          size: 2.5,
+          text: `FMCBR: ${fmcbrSignal.status}${breakType ? ` (${breakType})` : ''}${cb1 ? ' CB1✓' : ''}`,
+        });
+        
+        // Render each level as a circle marker (only if levels exist)
+        if (levels && levels.length > 0) {
+          levels.forEach(level => {
           let color = '#888888';
           let size = 1.5;
           let position: 'aboveBar' | 'belowBar' | 'inBar' = 'inBar';
@@ -268,17 +284,16 @@ export default function UnifiedMarkerManager({
             size,
             text: `${level.label}: ${level.price.toFixed(2)}`,
           });
-        });
-        
-        // Add break type indicator marker
-        if (breakType) {
+          });
+        } else {
+          // Show waiting status if no levels yet
           allMarkers.push({
             time: referenceTime as any,
-            position: 'inBar',
-            color: breakType === 'DB' ? '#ff6600' : '#ffaa00',
+            position: direction === 'BULLISH' ? 'belowBar' : 'aboveBar',
+            color: '#888888',
             shape: 'circle',
-            size: 2.0,
-            text: `FMCBR: ${breakType}${cb1 ? ' + CB1' : ''}`,
+            size: 1.5,
+            text: `Waiting for ${fmcbrSignal.status.replace('WAITING_', '').toLowerCase()}...`,
           });
         }
       }

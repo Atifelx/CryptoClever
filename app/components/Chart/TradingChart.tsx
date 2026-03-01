@@ -705,18 +705,26 @@ export default function TradingChart({
         
         {/* Unified Marker Manager - Merges markers from all indicators */}
         {candleSeriesRef.current && (
-          <UnifiedMarkerManager
-            candleSeries={candleSeriesRef.current}
-            semaforPoints={isEnabled('semafor') ? semaforPoints : []}
-            scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
-            trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
-            fmcbrSignal={keepLiveAnalysis ? fmcbrSignal : null}
-            currentCandleTime={candles.length > 0 ? candles[candles.length - 1]?.time : undefined}
-            showSemafor={isEnabled('semafor')}
-            showScalp={isEnabled('scalpSignal')}
-            showTrend={isEnabled('trendIndicator')}
-            showFMCBR={keepLiveAnalysis}
-          />
+          <>
+            <UnifiedMarkerManager
+              candleSeries={candleSeriesRef.current}
+              semaforPoints={isEnabled('semafor') ? semaforPoints : []}
+              scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
+              trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
+              fmcbrSignal={keepLiveAnalysis ? fmcbrSignal : null}
+              currentCandleTime={candles.length > 0 ? candles[candles.length - 1]?.time : undefined}
+              showSemafor={isEnabled('semafor')}
+              showScalp={isEnabled('scalpSignal')}
+              showTrend={isEnabled('trendIndicator')}
+              showFMCBR={keepLiveAnalysis}
+            />
+            {/* FMCBR Price Lines Overlay - Shows horizontal lines for levels */}
+            <FMCBROverlay
+              candleSeries={candleSeriesRef.current}
+              signal={keepLiveAnalysis ? fmcbrSignal : null}
+              showFMCBR={keepLiveAnalysis}
+            />
+          </>
         )}
       </div>
     </div>

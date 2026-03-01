@@ -36,8 +36,13 @@ export default function FMCBROverlay({
     });
     priceLinesRef.current = [];
 
-    // Only render if enabled and signal is ready
-    if (!showFMCBR || !signal || signal.status !== 'READY') {
+    // Only render if enabled and signal exists
+    if (!showFMCBR || !signal) {
+      return;
+    }
+    
+    // Only render price lines if status is READY (has levels)
+    if (signal.status !== 'READY' || !signal.levels || signal.levels.length === 0) {
       return;
     }
 
