@@ -271,34 +271,51 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     return { signal: 'WAIT', reason: 'Calculating indicators...' };
   }
 
+  // CRITICAL: Determine trend direction first using multiple candles (last 10)
+  // This prevents SHORT signals during uptrends
+  const trendLookback = Math.min(10, data.length - 1);
+  let uptrendCandles = 0;
+  let downtrendCandles = 0;
+  for (let i = currentIndex - trendLookback + 1; i <= currentIndex; i++) {
+    if (i > 0 && i < emaFast.length && i < emaSlow.length) {
+      if (emaFast[i] > emaSlow[i]) uptrendCandles++;
+      else if (emaFast[i] < emaSlow[i]) downtrendCandles++;
+    }
+  }
+  const isClearUptrend = uptrendCandles >= trendLookback * 0.7; // 70% of last 10 candles show uptrend
+  const isClearDowntrend = downtrendCandles >= trendLookback * 0.7; // 70% of last 10 candles show downtrend
+  const isUptrend = currentEMAFast > currentEMASlow;
+  const isDowntrend = currentEMAFast < currentEMASlow;
+
   // LONG signal conditions (RELAXED for 1-minute scalping)
   // For 1-minute candles, we need faster signals - relaxed thresholds
   const longConditions = [
-    currentEMAFast > currentEMASlow, // Uptrend
-    prevEMAFast <= prevEMASlow || (currentEMAFast > currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005), // EMA crossover OR strong trend (>0.05% separation)
-    currentRSI > 35 && currentRSI < 75, // RSI relaxed range (was 40-70)
-    currentClose > currentVWAP * 0.9995, // Price near or above VWAP (relaxed from exact >)
-    volumeRatio > 0.8, // Volume relaxed: >0.8x average (was >1.2x) for 1-minute scalping
-    currentMomentum > -0.1, // Positive or slightly negative momentum (was >0)
+    isUptrend, // Uptrend (EMA Fast > EMA Slow)
+    prevEMAFast <= prevEMASlow || (isUptrend && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005), // EMA crossover OR strong trend
+    currentRSI > 35 && currentRSI < 75, // RSI relaxed range
+    currentClose > currentVWAP * 0.9995, // Price near or above VWAP
+    volumeRatio > 0.8, // Volume >0.8x average
+    currentMomentum > 0, // Positive momentum (STRICT - must be positive)
   ];
 
   // SHORT signal conditions (RELAXED for 1-minute scalping)
+  // CRITICAL: Only trigger SHORT in clear downtrends
   const shortConditions = [
-    currentEMAFast < currentEMASlow, // Downtrend
-    prevEMAFast >= prevEMASlow || (currentEMAFast < currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005), // EMA crossover OR strong trend
-    currentRSI < 65 && currentRSI > 25, // RSI relaxed range (was 30-60)
-    currentClose < currentVWAP * 1.0005, // Price near or below VWAP (relaxed)
-    volumeRatio > 0.8, // Volume relaxed: >0.8x average (was >1.2x)
-    currentMomentum < 0.1, // Negative or slightly positive momentum (was <0)
+    isDowntrend, // Downtrend (EMA Fast < EMA Slow)
+    prevEMAFast >= prevEMASlow || (isDowntrend && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005), // EMA crossover OR strong trend
+    currentRSI < 65 && currentRSI > 25, // RSI relaxed range
+    currentClose < currentVWAP * 1.0005, // Price near or below VWAP
+    volumeRatio > 0.8, // Volume >0.8x average
+    currentMomentum < 0, // Negative momentum (STRICT - must be negative)
   ];
 
-  // Bollinger Band mean reversion signals (more aggressive)
-  const bbLong = currentClose < currentBBLower && currentRSI < 40; // Relaxed from 35
-  const bbShort = currentClose > currentBBUpper && currentRSI > 60; // Relaxed from 65
+  // Bollinger Band mean reversion signals (only in correct trend direction)
+  const bbLong = currentClose < currentBBLower && currentRSI < 40 && isUptrend; // Only in uptrend
+  const bbShort = currentClose > currentBBUpper && currentRSI > 60 && isDowntrend; // Only in downtrend
 
-  // Strong momentum signals (for fast 1-minute scalping)
-  const strongMomentumLong = currentMomentum > 0.3 && currentEMAFast > currentEMASlow && volumeRatio > 0.6;
-  const strongMomentumShort = currentMomentum < -0.3 && currentEMAFast < currentEMASlow && volumeRatio > 0.6;
+  // Strong momentum signals (for fast 1-minute scalping) - MUST match trend direction
+  const strongMomentumLong = currentMomentum > 0.3 && isUptrend && volumeRatio > 0.6;
+  const strongMomentumShort = currentMomentum < -0.3 && isDowntrend && volumeRatio > 0.6;
 
   // Generate signal
   const longScore = longConditions.filter(Boolean).length;
@@ -308,8 +325,9 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const TAKE_PROFIT_PCT = 0.008; // 0.8%
   const STOP_LOSS_PCT = 0.004; // 0.4%
 
+  // CRITICAL FIX: Check LONG first, and NEVER give SHORT if we're in a clear uptrend
   // RELAXED THRESHOLD: Require 4/6 conditions (was 5/6) OR strong momentum OR BB mean reversion
-  if (longScore >= 4 || bbLong || strongMomentumLong) {
+  if ((longScore >= 4 || bbLong || strongMomentumLong) && !isClearDowntrend) {
     // LONG signal
     const stopLoss = currentClose * (1 - STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 + TAKE_PROFIT_PCT);
@@ -339,8 +357,8 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       rsi: currentRSI,
       volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.0 ? 'MODERATE' : 'NORMAL',
     };
-  } else if (shortScore >= 4 || bbShort || strongMomentumShort) {
-    // SHORT signal
+  } else if ((shortScore >= 4 || bbShort || strongMomentumShort) && !isClearUptrend && isClearDowntrend) {
+    // SHORT signal - ONLY if we're in a clear downtrend and NOT in uptrend
     const stopLoss = currentClose * (1 + STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 - TAKE_PROFIT_PCT);
     const takeProfit2 = currentClose * (1 - TAKE_PROFIT_PCT * 1.5); // Extended TP
