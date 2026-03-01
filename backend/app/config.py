@@ -23,6 +23,12 @@ BINANCE_WS_BASE = "wss://stream.binance.com:9443"
 # Binance REST for bootstrap
 BINANCE_REST_BASE = "https://api.binance.com/api/v3"
 
+# Proxy configuration (optional - set HTTP_PROXY env var if Binance is blocked)
+# Example: HTTP_PROXY=http://proxy.example.com:8080
+HTTP_PROXY = os.getenv("HTTP_PROXY", None)
+HTTPS_PROXY = os.getenv("HTTPS_PROXY", None)
+WS_PROXY = os.getenv("WS_PROXY", None)
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://neondb_owner:npg_UP2wNXdc0eVa@ep-icy-lab-a1lqbhz7-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require",

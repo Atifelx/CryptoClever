@@ -66,11 +66,20 @@ async def health():
 async def test_binance():
     """Test endpoint to verify Binance API connectivity from Render."""
     import httpx
+    from app.config import HTTP_PROXY, HTTPS_PROXY
+    
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": "BTCUSDT", "interval": "1m", "limit": 5}
     
+    # Configure proxy if available
+    proxies = {}
+    if HTTPS_PROXY:
+        proxies["https://"] = HTTPS_PROXY
+    elif HTTP_PROXY:
+        proxies["https://"] = HTTP_PROXY
+    
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(proxies=proxies if proxies else None, timeout=10.0) as client:
             r = await client.get(url, params=params)
             r.raise_for_status()
             data = r.json()

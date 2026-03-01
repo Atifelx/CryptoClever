@@ -12,6 +12,8 @@ from app.config import (
     BINANCE_REST_BASE,
     BINANCE_WS_BASE,
     SYMBOLS,
+    HTTP_PROXY,
+    HTTPS_PROXY,
 )
 from app.redis_store import append_candle, set_candles, get_candles
 from app.utils import normalize_interval, normalize_symbol
@@ -99,9 +101,17 @@ async def fetch_klines_range(
         "endTime": end_time_sec * 1000,
         "limit": 1000,
     }
+    
+    # Configure proxy if available
+    proxies = {}
+    if HTTPS_PROXY:
+        proxies["https://"] = HTTPS_PROXY
+    elif HTTP_PROXY:
+        proxies["https://"] = HTTP_PROXY
+    
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params, timeout=10.0)
+        async with httpx.AsyncClient(proxies=proxies if proxies else None, timeout=10.0) as client:
+            r = await client.get(url, params=params)
             r.raise_for_status()
             data = r.json()
     except Exception as e:
