@@ -724,16 +724,11 @@ export default function TradingChart({
           {/* Chart canvas */}
           <div ref={chartContainerRef} className="w-full h-full" />
           
-          {/* Trend Indicator Overlay - Renders at top inside chart area */}
+          {/* Trend Indicator Overlay - Renders at top inside chart area with white circle at tail */}
           <TrendIndicatorOverlay
             trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
             showTrend={isEnabled('trendIndicator')}
-          />
-          
-          {/* Scalp Signal Overlay - White circle below Trend Indicator arrow, inside chart area */}
-          <ScalpSignalOverlay
             scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
-            trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
             showScalp={isEnabled('scalpSignal')}
           />
         </div>
