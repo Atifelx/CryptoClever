@@ -32,10 +32,8 @@ export default function ScalpSignalOverlay({
     return null;
   }
 
-  // Only show if Trend Indicator is also visible (to position below arrow)
-  if (!trendMarker) {
-    return null;
-  }
+  // Position below Trend Indicator arrow if available, otherwise just at top
+  const topPosition = trendMarker ? 'top-16' : 'top-2';
 
   const isLong = latestSignal.signal === 'LONG';
   const rsiText = latestSignal.rsi != null ? `RSI: ${latestSignal.rsi.toFixed(0)}` : '';
@@ -44,7 +42,7 @@ export default function ScalpSignalOverlay({
   const label = `Scalp ${latestSignal.signal}${rsiText ? ` | ${rsiText}` : ''} | ${tp2Text} | ${slText}`;
 
   return (
-    <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-30 pointer-events-none">
+    <div className={`absolute ${topPosition} left-1/2 transform -translate-x-1/2 z-30 pointer-events-none`}>
       {/* White Circle with Pulsing Glow Animation */}
       <div className="flex flex-col items-center gap-2">
         {/* Pulsing White Circle - positioned at tail/end of arrow */}

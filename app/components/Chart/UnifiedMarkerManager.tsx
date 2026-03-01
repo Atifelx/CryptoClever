@@ -111,12 +111,28 @@ export default function UnifiedMarkerManager({
     // This prevents visibility issues with markers overlapping candles
 
     // ──── SCALP SIGNAL MARKERS ────
-    // REMOVED: White circle now renders as overlay below Trend Indicator arrow (see ScalpSignalOverlay.tsx)
-    // This prevents visibility issues with circle overlapping candles
-    // Only show WAIT status as marker if needed
+    // White circle now also renders as overlay (see ScalpSignalOverlay.tsx)
+    // But keep markers as fallback for visibility on chart
     if (showScalp && scalpSignals && scalpSignals.length > 0) {
       for (const item of scalpSignals) {
-        if (item.signal === 'WAIT') {
+        if (item.signal === 'LONG' || item.signal === 'SHORT') {
+          const isBuy = item.signal === 'LONG';
+          const rsiText = item.rsi != null ? `RSI: ${item.rsi.toFixed(0)}` : '';
+          const tp2Text = `TP2: ${item.takeProfit2.toFixed(0)}`;
+          const slText = `SL: ${item.stopLoss.toFixed(0)}`;
+          const label = `Scalp ${item.signal}${rsiText ? ` | ${rsiText}` : ''} | ${tp2Text} | ${slText}`;
+
+          // Keep arrow marker on chart for visibility
+          const arrowColor = isBuy ? '#4CAF50' : '#F44336';
+          allMarkers.push({
+            time: item.time as any,
+            position: isBuy ? 'belowBar' : 'aboveBar',
+            color: arrowColor,
+            shape: isBuy ? 'arrowUp' : 'arrowDown',
+            size: 2.5,
+            text: label,
+          });
+        } else {
           // WAIT: show one grey circle so the indicator is visible
           allMarkers.push({
             time: item.time as any,
@@ -127,7 +143,6 @@ export default function UnifiedMarkerManager({
             text: `Scalp: WAIT (${item.reason})`,
           });
         }
-        // LONG/SHORT signals now render in ScalpSignalOverlay component
       }
     }
 
