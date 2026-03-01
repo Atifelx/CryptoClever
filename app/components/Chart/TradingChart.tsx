@@ -17,7 +17,6 @@ import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
 import FMCBROverlay from './FMCBROverlay';
 import TrendIndicatorOverlay from './TrendIndicatorOverlay';
-import ScalpSignalOverlay from './ScalpSignalOverlay';
 import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
 
