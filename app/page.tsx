@@ -95,14 +95,10 @@ export default function Home() {
   const [indicatorData, setIndicatorData] = useState<{
     semaforPoints: SemaforPoint[];
     semaforTrend: SemaforTrend;
-    patternSignals: PatternSignal[];
-    phoenixSignals: PhoenixSignal[];
     scalpSignals: ScalpDisplayItem[];
   }>({
     semaforPoints: [],
     semaforTrend: { trend: 'NEUTRAL', ema20: 0, ema50: 0 },
-    patternSignals: [],
-    phoenixSignals: [],
     scalpSignals: [],
   });
 
