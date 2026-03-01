@@ -245,7 +245,7 @@ export default function TradingChart({
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 5,
-        barSpacing: 6, // Tighter spacing for zoom-out view (more candles visible)
+        barSpacing: 4, // Medium spacing - shows ~120-150 candles (4-5 hours for 1m)
         fixLeftEdge: false,
         fixRightEdge: false,
         lockVisibleTimeRangeOnResize: false,
@@ -535,8 +535,9 @@ export default function TradingChart({
               setTimeout(() => {
                 try {
                   if (chartRef.current && candlestickData.length > 0) {
-                    // Zoom OUT view: show more candles for broad overview (~150 candles)
-                    const visibleCandles = 150;
+                    // Set zoom to show ~120 candles (4 hours for 1m timeframe) - matches image
+                    // This shows approximately 4-5 hours of data, perfect for scalping view
+                    const visibleCandles = 120;
                     const lastTime = candlestickData[candlestickData.length - 1].time as number;
                     const firstVisibleIndex = Math.max(0, candlestickData.length - visibleCandles);
                     const firstTime = candlestickData[firstVisibleIndex].time as number;
