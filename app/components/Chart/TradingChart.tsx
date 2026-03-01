@@ -148,12 +148,15 @@ export default function TradingChart({
   // FMCBR Core Engine — Official FMCBR 3.0 Algorithm
   const fmcbrSignal = useMemo((): FMCBRSignal | null => {
     if (typeof window === 'undefined') return null;
-    if (isLoading || candles.length < 50) {
-      console.log('[FMCBR] Not calculating - isLoading:', isLoading, 'candles:', candles.length);
+    // Require at least 200 closed candles for stable calculation (was 50)
+    const closedCandles = candles.slice(0, candles.length - 1);
+    if (isLoading || closedCandles.length < 200) {
+      console.log('[FMCBR] Not calculating - isLoading:', isLoading, 'closedCandles:', closedCandles.length);
       return null;
     }
 
     try {
+      // Pass all candles - function will use closed candles internally
       const signal = calculateFMCBR(candles);
       console.log('[FMCBR] Calculated signal:', {
         status: signal?.status,
@@ -162,6 +165,7 @@ export default function TradingChart({
         cb1: signal?.cb1,
         levelsCount: signal?.levels?.length || 0,
         hasLevels: signal?.levels && signal.levels.length > 0,
+        candlesUsed: closedCandles.length,
       });
       return signal;
     } catch (error) {

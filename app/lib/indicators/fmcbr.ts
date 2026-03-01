@@ -96,7 +96,8 @@ function findABCPattern(candles: Candle[], startIndex: number): ABCPattern | nul
   if (startIndex < 10 || startIndex >= candles.length) return null;
   
   // Look for swing high/low pattern
-  const window = candles.slice(Math.max(0, startIndex - 20), startIndex + 5);
+  // Use larger window (50 candles) for better pattern detection (was 20)
+  const window = candles.slice(Math.max(0, startIndex - 50), startIndex + 5);
   
   // Find swing high (for bearish break) or swing low (for bullish break)
   let swingHigh = -Infinity;
@@ -326,18 +327,26 @@ function calculateFibonacciEntry(
 
 // ──── Main FMCBR Strategy ────
 export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
-  if (!candles || candles.length < 50) {
+  // CRITICAL: Use only closed candles to prevent repainting
+  const closedCandles = candles.slice(0, candles.length - 1);
+  
+  // Require at least 200 candles for stable calculation (was 50)
+  if (!closedCandles || closedCandles.length < 200) {
     return null;
   }
   
+  // Use last 1000 candles for better swing detection and calibration (was all candles)
+  const data = closedCandles.length > 1000 ? closedCandles.slice(-1000) : closedCandles;
+  
   try {
     // Step 1: Detect IB or DB
-    // Look for breaks in the last 20 candles
+    // Look for breaks in the last 50 candles (was 20) for more stable detection
     let breakType: 'IB' | 'DB' | null = null;
     let breakIndex = -1;
     
-    for (let i = Math.max(0, candles.length - 20); i < candles.length - 1; i++) {
-      const detectedBreak = detectBreak(candles, i);
+    const breakLookback = Math.min(50, data.length - 1);
+    for (let i = Math.max(0, data.length - breakLookback); i < data.length - 1; i++) {
+      const detectedBreak = detectBreak(data, i);
       if (detectedBreak) {
         breakType = detectedBreak;
         breakIndex = i;
@@ -370,7 +379,8 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
     
     if (!cb1Detected) {
       // Find swing points for potential setup
-      const window = candles.slice(Math.max(0, breakIndex - 20), breakIndex + 5);
+      // Use larger window (50 candles) for better swing detection (was 20)
+      const window = data.slice(Math.max(0, breakIndex - 50), breakIndex + 5);
       let swingHigh = -Infinity;
       let swingLow = Infinity;
       
@@ -395,7 +405,7 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
     }
     
     // Step 3: Find swing points for Fibonacci calculation
-    const pattern = findABCPattern(candles, breakIndex);
+    const pattern = findABCPattern(data, breakIndex);
     if (!pattern) {
       return {
         breakType,
