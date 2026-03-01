@@ -3,7 +3,12 @@
 import { useTradingStore } from '../../store/tradingStore';
 
 export default function TradingSignalsPanel() {
-  const { coreEngineAnalysis } = useTradingStore();
+  const { coreEngineAnalysis, keepLiveAnalysis } = useTradingStore();
+
+  // Hide buy/sell signals when Core Engine (FMCBR) is active - FMCBR shows visual lines only
+  if (keepLiveAnalysis) {
+    return null;
+  }
 
   if (!coreEngineAnalysis?.zones || coreEngineAnalysis.zones.length === 0) {
     return null;
