@@ -16,6 +16,7 @@ import { calculateFMCBR } from '../../lib/indicators/fmcbr';
 import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
 import FMCBROverlay from './FMCBROverlay';
+import TrendIndicatorOverlay from './TrendIndicatorOverlay';
 import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
 
@@ -718,7 +719,13 @@ export default function TradingChart({
         )}
 
         {/* Chart container - force recreation with unique key */}
-        <div key={`chart-container-${symbol}`} ref={chartContainerRef} className="w-full h-full" />
+        <div key={`chart-container-${symbol}`} ref={chartContainerRef} className="w-full h-full relative" />
+        
+        {/* Trend Indicator Overlay - Renders at top of chart */}
+        <TrendIndicatorOverlay
+          trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
+          showTrend={isEnabled('trendIndicator')}
+        />
         
         {/* Unified Marker Manager - Merges markers from all indicators */}
         {candleSeriesRef.current && (
@@ -727,12 +734,12 @@ export default function TradingChart({
               candleSeries={candleSeriesRef.current}
               semaforPoints={isEnabled('semafor') ? semaforPoints : []}
               scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
-              trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
+              trendMarker={null} // Trend indicator now uses overlay, not markers
               fmcbrSignal={keepLiveAnalysis ? fmcbrSignal : null}
               currentCandleTime={candles.length > 0 ? candles[candles.length - 1]?.time : undefined}
               showSemafor={isEnabled('semafor')}
               showScalp={isEnabled('scalpSignal')}
-              showTrend={isEnabled('trendIndicator')}
+              showTrend={false} // Trend indicator now uses overlay, not markers
               showFMCBR={keepLiveAnalysis}
             />
             {/* FMCBR Price Lines Overlay - Shows horizontal lines for levels */}
