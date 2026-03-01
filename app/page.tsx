@@ -16,6 +16,7 @@ import { INDICATOR_REGISTRY } from './lib/indicators/registry';
 import { SemaforPoint } from './lib/indicators/types';
 import type { SemaforTrend } from './lib/indicators/semafor';
 import type { ScalpDisplayItem } from './lib/indicators/scalpSignal';
+import type { TrendMarker } from './lib/indicators/trendIndicator';
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
@@ -96,10 +97,12 @@ export default function Home() {
     semaforPoints: SemaforPoint[];
     semaforTrend: SemaforTrend;
     scalpSignals: ScalpDisplayItem[];
+    trendMarker: TrendMarker | null;
   }>({
     semaforPoints: [],
     semaforTrend: { trend: 'NEUTRAL', ema20: 0, ema50: 0 },
     scalpSignals: [],
+    trendMarker: null,
   });
 
   // Use safe defaults during SSR

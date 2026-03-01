@@ -4,13 +4,16 @@ import { useEffect, useRef } from 'react';
 import { ISeriesApi } from 'lightweight-charts';
 import { SemaforPoint } from '../../lib/indicators/types';
 import type { ScalpDisplayItem } from '../../lib/indicators/scalpSignal';
+import type { TrendMarker } from '../../lib/indicators/trendIndicator';
 
 interface UnifiedMarkerManagerProps {
   candleSeries: ISeriesApi<'Candlestick'> | null;
   semaforPoints: SemaforPoint[];
   scalpSignals: ScalpDisplayItem[];
+  trendMarker: TrendMarker | null;
   showSemafor: boolean;
   showScalp: boolean;
+  showTrend: boolean;
 }
 
 /**
@@ -94,6 +97,56 @@ export default function UnifiedMarkerManager({
       }
     }
 
+    // ──── TREND INDICATOR MARKERS (visual trend line markers) ────
+    if (showTrend && trendMarker) {
+      const { trend, action, confidence } = trendMarker;
+      
+      // Color based on trend
+      let markerColor: string;
+      let arrowColor: string;
+      let arrowShape: 'arrowUp' | 'arrowDown';
+      let position: 'aboveBar' | 'belowBar';
+      
+      if (trend === 'UPTREND' && action === 'BUY_ALLOWED') {
+        markerColor = '#00ff66'; // Green for uptrend
+        arrowColor = '#80ffbb';
+        arrowShape = 'arrowUp';
+        position = 'belowBar';
+      } else if (trend === 'DOWNTREND') {
+        markerColor = '#ff2222'; // Red for downtrend
+        arrowColor = '#ff9999';
+        arrowShape = 'arrowDown';
+        position = 'aboveBar';
+      } else {
+        // SIDEWAYS
+        markerColor = '#ffaa00'; // Orange for sideways
+        arrowColor = '#ffcc66';
+        arrowShape = 'arrowUp'; // Neutral
+        position = 'inBar';
+      }
+      
+      // Main trend marker circle
+      allMarkers.push({
+        time: trendMarker.time as any,
+        position,
+        color: markerColor,
+        shape: 'circle',
+        size: confidence > 80 ? 3.0 : confidence > 60 ? 2.5 : 2.0,
+        text: `${trend} (${confidence}%)`,
+      });
+      
+      // Directional arrow
+      if (trend !== 'SIDEWAYS') {
+        allMarkers.push({
+          time: trendMarker.time as any,
+          position: 'inBar',
+          color: arrowColor,
+          shape: arrowShape,
+          size: 2.0,
+        });
+      }
+    }
+
     // ──── SCALP SIGNAL MARKERS (white circle + arrow; WAIT = grey circle) ────
     if (showScalp && scalpSignals && scalpSignals.length > 0) {
       for (const item of scalpSignals) {
@@ -156,7 +209,7 @@ export default function UnifiedMarkerManager({
     } catch (error) {
       console.error('Unified marker error:', error);
     }
-  }, [candleSeries, semaforPoints, scalpSignals, showSemafor, showScalp]);
+  }, [candleSeries, semaforPoints, scalpSignals, trendMarker, showSemafor, showScalp, showTrend]);
 
   return null;
 }

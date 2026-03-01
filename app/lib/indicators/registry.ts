@@ -36,6 +36,16 @@ export const INDICATOR_REGISTRY: Record<string, IndicatorConfig> = {
     hasSettings: true,
     icon: '⚡',
   },
+  // Trend Indicator
+  trendIndicator: {
+    id: 'trendIndicator',
+    name: 'Trend Indicator',
+    category: 'trend',
+    description: 'EMA(20/50/200) trend identification with volume confirmation - shows UPTREND/DOWNTREND/SIDEWAYS',
+    defaultEnabled: false,
+    hasSettings: true,
+    icon: '📈',
+  },
 };
 
 /**

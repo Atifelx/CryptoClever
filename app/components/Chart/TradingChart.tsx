@@ -9,6 +9,8 @@ import { SemaforPoint } from '../../lib/indicators/types';
 import type { SemaforTrend } from '../../lib/indicators/semafor';
 import { generateScalpSignal, getScalpDisplayItems } from '../../lib/indicators/scalpSignal';
 import type { ScalpDisplayItem } from '../../lib/indicators/scalpSignal';
+import { getTrendDisplayItem } from '../../lib/indicators/trendIndicator';
+import type { TrendMarker } from '../../lib/indicators/trendIndicator';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
 import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
@@ -22,6 +24,7 @@ interface TradingChartProps {
     semaforPoints: SemaforPoint[];
     semaforTrend: SemaforTrend;
     scalpSignals: ScalpDisplayItem[];
+    trendMarker: TrendMarker | null;
   }) => void;
 }
 
@@ -119,14 +122,32 @@ export default function TradingChart({
     isLoading,
   ]);
 
+  // Trend Indicator — analyzes last 1000 candles with EMA(20/50/200) and volume
+  const trendMarker = useMemo((): TrendMarker | null => {
+    if (typeof window === 'undefined') return null;
+    if (isLoading || candles.length < 200) return null; // need at least 200 candles for EMA200
+
+    try {
+      return getTrendDisplayItem(candles);
+    } catch (error) {
+      console.error('[Trend] Calculation error:', error);
+      return null;
+    }
+  }, [
+    candles.length,
+    candles[candles.length - 1]?.time,
+    candles[candles.length - 1]?.close,
+    isLoading,
+  ]);
+
   // Expose indicator data to parent component (deferred to avoid setState-during-render)
   useEffect(() => {
     if (!onIndicatorDataUpdate) return;
-    const payload = { semaforPoints, semaforTrend, scalpSignals };
+    const payload = { semaforPoints, semaforTrend, scalpSignals, trendMarker };
     queueMicrotask(() => {
       onIndicatorDataUpdate(payload);
     });
-  }, [semaforPoints, semaforTrend, scalpSignals, onIndicatorDataUpdate]);
+  }, [semaforPoints, semaforTrend, scalpSignals, trendMarker, onIndicatorDataUpdate]);
 
   // Initialize chart - RECREATE when symbol changes to ensure clean state
   useEffect(() => {
@@ -665,8 +686,10 @@ export default function TradingChart({
             candleSeries={candleSeriesRef.current}
             semaforPoints={isEnabled('semafor') ? semaforPoints : []}
             scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
+            trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
             showSemafor={isEnabled('semafor')}
             showScalp={isEnabled('scalpSignal')}
+            showTrend={isEnabled('trendIndicator')}
           />
         )}
       </div>
