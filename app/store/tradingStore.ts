@@ -57,6 +57,9 @@ interface TradingState {
   // Trade history panel visibility
   showHistory: boolean;
   
+  // Core Engine / FMCBR Live Analysis toggle
+  keepLiveAnalysis: boolean;
+  
   // Core Engine Analysis
   coreEngineAnalysis: {
     structure: string;
@@ -99,6 +102,7 @@ interface TradingState {
       time: number;
     }>;
   } | null) => void;
+  setKeepLiveAnalysis: (enabled: boolean) => void;
   setShowHistory: (show: boolean) => void;
 }
 
@@ -142,6 +146,7 @@ export const useTradingStore = create<TradingState>()(
       isLoadingPairs: false,
       tickerData: {},
       coreEngineAnalysis: null,
+      keepLiveAnalysis: false,
       showHistory: false,
 
       // Actions
@@ -173,6 +178,7 @@ export const useTradingStore = create<TradingState>()(
       
       setTickerData: (data) => set({ tickerData: data }),
       setCoreEngineAnalysis: (analysis) => set({ coreEngineAnalysis: analysis }),
+      setKeepLiveAnalysis: (enabled) => set({ keepLiveAnalysis: enabled }),
       setShowHistory: (show) => set({ showHistory: show }),
     }),
     {

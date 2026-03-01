@@ -197,6 +197,93 @@ export default function UnifiedMarkerManager({
       }
     }
 
+    // ──── FMCBR CORE ENGINE MARKERS (render levels as circles like Semafor) ────
+    if (showFMCBR && fmcbrSignal && fmcbrSignal.status === 'READY') {
+      const { levels, direction, breakType, cb1 } = fmcbrSignal;
+      
+      // Color scheme
+      const colors = {
+        bullish: {
+          entry: '#00ff66',      // Green for entries
+          tp: '#ffaa00',         // Orange for TP
+          base: '#ff2222',       // Red for base
+          setup: '#00aaff',      // Blue for setup
+        },
+        bearish: {
+          entry: '#ff2222',     // Red for entries
+          tp: '#ffaa00',         // Orange for TP
+          base: '#00ff66',       // Green for base
+          setup: '#00aaff',      // Blue for setup
+        },
+      };
+      
+      const scheme = direction === 'BULLISH' ? colors.bullish : colors.bearish;
+      
+      // Get reference time for marker placement
+      let referenceTime: number | null = currentCandleTime || null;
+      
+      if (referenceTime === null) {
+        if (semaforPoints.length > 0) {
+          referenceTime = semaforPoints[semaforPoints.length - 1].time;
+        } else if (scalpSignals.length > 0) {
+          referenceTime = scalpSignals[scalpSignals.length - 1].time;
+        } else if (trendMarker) {
+          referenceTime = trendMarker.time;
+        }
+      }
+      
+      // If no reference time, skip rendering (will render when candles are available)
+      if (referenceTime !== null) {
+        // Render each level as a circle marker
+        levels.forEach(level => {
+          let color = '#888888';
+          let size = 1.5;
+          let position: 'aboveBar' | 'belowBar' | 'inBar' = 'inBar';
+          
+          // Determine position and style based on level type
+          if (level.type === 'base') {
+            color = scheme.base;
+            size = 2.5;
+            position = direction === 'BULLISH' ? 'aboveBar' : 'belowBar';
+          } else if (level.type === 'setup') {
+            color = scheme.setup;
+            size = 2.5;
+            position = direction === 'BULLISH' ? 'belowBar' : 'aboveBar';
+          } else if (level.type === 'entry') {
+            color = scheme.entry;
+            size = 2.0;
+            position = direction === 'BULLISH' ? 'belowBar' : 'aboveBar';
+          } else if (level.type === 'tp') {
+            color = scheme.tp;
+            size = 1.5;
+            position = direction === 'BULLISH' ? 'aboveBar' : 'belowBar';
+          }
+          
+          // Create marker for this level with price info in text
+          allMarkers.push({
+            time: referenceTime as any,
+            position,
+            color,
+            shape: 'circle',
+            size,
+            text: `${level.label}: ${level.price.toFixed(2)}`,
+          });
+        });
+        
+        // Add break type indicator marker
+        if (breakType) {
+          allMarkers.push({
+            time: referenceTime as any,
+            position: 'inBar',
+            color: breakType === 'DB' ? '#ff6600' : '#ffaa00',
+            shape: 'circle',
+            size: 2.0,
+            text: `FMCBR: ${breakType}${cb1 ? ' + CB1' : ''}`,
+          });
+        }
+      }
+    }
+
     // Sort all markers: time → position → shape
     const posOrder = { 'aboveBar': 0, 'inBar': 1, 'belowBar': 2 };
     const shapeOrder = { 'circle': 0, 'square': 1, 'arrowDown': 2, 'arrowUp': 2 };

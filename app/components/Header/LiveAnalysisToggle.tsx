@@ -34,8 +34,8 @@ interface AnalysisResult {
 }
 
 export default function LiveAnalysisToggle() {
-  const { selectedSymbol, selectedTimeframe, setCoreEngineAnalysis, tradingData } = useTradingStore();
-  const [isEnabled, setIsEnabled] = useState(false);
+  const { selectedSymbol, selectedTimeframe, setCoreEngineAnalysis, keepLiveAnalysis, setKeepLiveAnalysis, tradingData } = useTradingStore();
+  const [isEnabled, setIsEnabled] = useState(keepLiveAnalysis);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const previousStructureRef = useRef<string | null>(null);
@@ -239,7 +239,9 @@ export default function LiveAnalysisToggle() {
   }, []);
 
   const handleToggle = () => {
-    setIsEnabled(!isEnabled);
+    const newValue = !isEnabled;
+    setIsEnabled(newValue);
+    setKeepLiveAnalysis(newValue); // Sync with store
     // Reset previous structure when toggling off
     if (isEnabled) {
       console.log('🔴 Core Engine disabled - Clearing state');
