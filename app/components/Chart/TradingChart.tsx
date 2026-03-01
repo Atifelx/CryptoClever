@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { createChart, IChartApi, ISeriesApi, ColorType, Time } from 'lightweight-charts';
 import { useCandles } from '../../hooks/useCandles';
+import { useTradingStore } from '../../store/tradingStore';
 import type { Candle } from '../../store/candlesStore';
 import { calculateSemafor, getSemaforTrend } from '../../lib/indicators/semafor';
 import { SemaforPoint } from '../../lib/indicators/types';
@@ -11,7 +12,10 @@ import { generateScalpSignal, getScalpDisplayItems } from '../../lib/indicators/
 import type { ScalpDisplayItem } from '../../lib/indicators/scalpSignal';
 import { getTrendDisplayItem } from '../../lib/indicators/trendIndicator';
 import type { TrendMarker } from '../../lib/indicators/trendIndicator';
+import { calculateFMCBR } from '../../lib/indicators/fmcbr';
+import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
+import FMCBROverlay from './FMCBROverlay';
 import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
 
@@ -48,6 +52,7 @@ export default function TradingChart({
   const panStartPositionRef = useRef<number | null>(null);
 
   const { candles, isConnected, isLoading } = useCandles();
+  const { keepLiveAnalysis } = useTradingStore();
 
   // DEBUG: Log what data TradingChart receives from useCandles
   useEffect(() => {
@@ -131,6 +136,24 @@ export default function TradingChart({
       return getTrendDisplayItem(candles);
     } catch (error) {
       console.error('[Trend] Calculation error:', error);
+      return null;
+    }
+  }, [
+    candles.length,
+    candles[candles.length - 1]?.time,
+    candles[candles.length - 1]?.close,
+    isLoading,
+  ]);
+
+  // FMCBR Core Engine — Official FMCBR 3.0 Algorithm
+  const fmcbrSignal = useMemo((): FMCBRSignal | null => {
+    if (typeof window === 'undefined') return null;
+    if (isLoading || candles.length < 50) return null; // need at least 50 candles
+
+    try {
+      return calculateFMCBR(candles);
+    } catch (error) {
+      console.error('[FMCBR] Calculation error:', error);
       return null;
     }
   }, [
@@ -690,6 +713,13 @@ export default function TradingChart({
             showSemafor={isEnabled('semafor')}
             showScalp={isEnabled('scalpSignal')}
             showTrend={isEnabled('trendIndicator')}
+          />
+          
+          {/* FMCBR Core Engine Overlay */}
+          <FMCBROverlay
+            candleSeries={candleSeriesRef.current}
+            signal={keepLiveAnalysis ? fmcbrSignal : null}
+            showFMCBR={keepLiveAnalysis}
           />
         )}
       </div>

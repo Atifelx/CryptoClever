@@ -1,173 +1,457 @@
-import { Candle, FMCBRLevels, KeyLevel, BollingerBands, CamarillaLevels } from './types';
-import { calculateFibonacci } from './fibonacci';
-import { calculateMurrayMath } from './murrayMath';
-import { calculateCamarilla } from './camarilla';
-import { calculateSemafor } from './semafor';
-
 /**
- * Calculate Bollinger Bands
+ * FMCBR 3.0 - Official Algorithm
+ * Fibo Musang Candle Break Retest
+ * 
+ * Based on official documentation by Mohd Zulkifli & Baha (2011)
  */
-function calculateBollingerBands(candles: Candle[], period = 20, stdDev = 2): BollingerBands {
-  if (candles.length < period) {
-    const lastClose = candles[candles.length - 1]?.close || 0;
-    return {
-      upper: lastClose,
-      middle: lastClose,
-      lower: lastClose
-    };
-  }
+
+import type { Candle } from '../../store/candlesStore';
+
+// ──── FIBONACCI SETTINGS ────
+const FIBONACCI_RATIOS = {
+  // Entry Levels
+  BASE: 0.000,
+  MINOR_ENTRY: 0.382,
+  MAJOR_ENTRY: 0.236,
+  SETUP: 1.000,
   
-  const closes = candles.slice(-period).map(c => c.close);
-  const sma = closes.reduce((a, b) => a + b, 0) / closes.length;
-  
-  const variance = closes.reduce((sum, price) => 
-    sum + Math.pow(price - sma, 2), 0
-  ) / closes.length;
-  
-  const sd = Math.sqrt(variance);
-  
-  return {
-    upper: sma + stdDev * sd,
-    middle: sma,
-    lower: sma - stdDev * sd
-  };
+  // Take Profit Levels
+  TP1: 1.618,
+  TP1_EXTENDED: 1.88,
+  TP2: 2.618,
+  TP2_EXTENDED: 2.88,
+  TP3: 4.23,
+  TP3_EXTENDED: 4.88,
+};
+
+export interface FMCBRLevel {
+  price: number;
+  label: string;
+  type: 'entry' | 'tp' | 'base' | 'setup';
+  level: string; // e.g., "TP1", "Major Entry", "Base"
 }
 
-/**
- * Consolidate levels that are too close together
- */
-function consolidateLevels(levels: KeyLevel[]): KeyLevel[] {
-  const consolidated: KeyLevel[] = [];
-  const sorted = [...levels].sort((a, b) => a.price - b.price);
+export interface FMCBRSignal {
+  breakType: 'IB' | 'DB' | null; // Initial Break or Dominant Break
+  cb1: boolean; // Candle Break 1 detected
+  direction: 'BULLISH' | 'BEARISH' | null;
+  swingHigh: number;
+  swingLow: number;
+  base: number;
+  setup: number;
+  levels: FMCBRLevel[];
+  entryMajor: number;
+  entryMinor: number;
+  status: 'WAITING_BREAK' | 'WAITING_CB1' | 'WAITING_RETEST' | 'READY';
+}
+
+// ──── Helper: Get trend direction ────
+function getTrend(candles: Candle[], index: number): 'UP' | 'DOWN' {
+  if (index < 1) return 'UP';
+  const current = candles[index];
+  const previous = candles[index - 1];
+  return current.close > previous.close ? 'UP' : 'DOWN';
+}
+
+// ──── Helper: Check if candle is opposing trend ────
+function isOpposing(candle: Candle, trend: 'UP' | 'DOWN'): boolean {
+  if (trend === 'UP') {
+    return candle.close < candle.open; // Bearish candle
+  } else {
+    return candle.close > candle.open; // Bullish candle
+  }
+}
+
+// ──── Step 1: Detect Break Types (IB or DB) ────
+function detectBreak(candles: Candle[], index: number): 'IB' | 'DB' | null {
+  if (index < 1 || index >= candles.length) return null;
   
-  for (const level of sorted) {
-    const existing = consolidated.find(l => 
-      Math.abs(l.price - level.price) / Math.max(l.price, level.price, 0.01) < 0.001
-    );
-    
-    if (existing) {
-      // Strengthen existing level
-      existing.strength = Math.max(existing.strength, level.strength);
+  const currentTrend = getTrend(candles, index - 1);
+  let opposingCount = 0;
+  
+  // Count consecutive opposing candles starting from index
+  for (let i = index; i < candles.length && i < index + 5; i++) {
+    if (isOpposing(candles[i], currentTrend)) {
+      opposingCount++;
     } else {
-      consolidated.push(level);
+      break;
     }
   }
   
-  return consolidated;
+  if (opposingCount >= 3) return 'DB'; // Dominant Break (3+ opposing candles)
+  if (opposingCount >= 1) return 'IB'; // Initial Break (1-2 opposing candles)
+  
+  return null;
 }
 
-/**
- * Identify key support/resistance levels from all indicators
- */
-function identifyKeyLevels(
-  fibonacci: any[],
-  murrayMath: number[],
-  camarilla: CamarillaLevels | null,
-  bollinger: BollingerBands,
-  semafor: any[],
-  currentPrice: number
-): KeyLevel[] {
-  const levels: KeyLevel[] = [];
+// ──── Step 2: Find ABC Pattern ────
+interface ABCPattern {
+  A: number; // Swing high/low
+  B: number; // Retracement point
+  C: number; // Break point
+  type: 'high' | 'low';
+}
+
+function findABCPattern(candles: Candle[], startIndex: number): ABCPattern | null {
+  if (startIndex < 10 || startIndex >= candles.length) return null;
   
-  // Add Fibonacci levels
-  fibonacci.forEach(fib => {
+  // Look for swing high/low pattern
+  const window = candles.slice(Math.max(0, startIndex - 20), startIndex + 5);
+  
+  // Find swing high (for bearish break) or swing low (for bullish break)
+  let swingHigh = -Infinity;
+  let swingLow = Infinity;
+  let swingHighIndex = -1;
+  let swingLowIndex = -1;
+  
+  for (let i = 1; i < window.length - 1; i++) {
+    const candle = window[i];
+    if (candle.high > swingHigh) {
+      swingHigh = candle.high;
+      swingHighIndex = i;
+    }
+    if (candle.low < swingLow) {
+      swingLow = candle.low;
+      swingLowIndex = i;
+    }
+  }
+  
+  if (swingHighIndex === -1 || swingLowIndex === -1) return null;
+  
+  // Determine pattern type based on break direction
+  const breakCandle = candles[startIndex];
+  const isBearishBreak = breakCandle.close < breakCandle.open;
+  
+  if (isBearishBreak && swingHighIndex < swingLowIndex) {
+    // Bearish: A = high, B = low, C = break
+    return {
+      A: swingHigh,
+      B: swingLow,
+      C: breakCandle.close,
+      type: 'high',
+    };
+  } else if (!isBearishBreak && swingLowIndex < swingHighIndex) {
+    // Bullish: A = low, B = high, C = break
+    return {
+      A: swingLow,
+      B: swingHigh,
+      C: breakCandle.close,
+      type: 'low',
+    };
+  }
+  
+  return null;
+}
+
+// ──── Step 3: Detect CB1 (Candle Break 1) ────
+function detectCB1(candles: Candle[], breakIndex: number): boolean {
+  const pattern = findABCPattern(candles, breakIndex);
+  if (!pattern) return false;
+  
+  // CB1 occurs when price breaks point B after IB/DB
+  // Check if current price has broken point B
+  const currentCandle = candles[candles.length - 1];
+  
+  if (pattern.type === 'high') {
+    // Bearish: CB1 when price breaks below point B (swing low)
+    return currentCandle.close < pattern.B;
+  } else {
+    // Bullish: CB1 when price breaks above point B (swing high)
+    return currentCandle.close > pattern.B;
+  }
+}
+
+// ──── Step 4: Calculate Fibonacci Levels ────
+function calculateFibonacciTP(
+  swingHigh: number,
+  swingLow: number,
+  direction: 'BULLISH' | 'BEARISH'
+): FMCBRLevel[] {
+  const range = Math.abs(swingHigh - swingLow);
+  const levels: FMCBRLevel[] = [];
+  
+  if (direction === 'BULLISH') {
+    // Setup = swing low, Base = swing high
+    const base = swingHigh;
+    const setup = swingLow;
+    
     levels.push({
-      price: fib.price,
-      type: fib.price > currentPrice ? 'resistance' : 'support',
-      strength: 2,
-      source: `Fib ${fib.label}`
+      price: base,
+      label: 'Base',
+      type: 'base',
+      level: 'Base',
     });
-  });
-  
-  // Add Murray Math levels
-  murrayMath.forEach((price, index) => {
+    
     levels.push({
-      price,
-      type: price > currentPrice ? 'resistance' : 'support',
-      strength: 1,
-      source: `Murray ${index}/8`
+      price: setup,
+      label: 'Setup',
+      type: 'setup',
+      level: 'Setup',
     });
-  });
-  
-  // Add Camarilla pivots
-  if (camarilla) {
-    Object.entries(camarilla).forEach(([key, value]) => {
-      if (typeof value === 'number' && key !== 'PP') {
-        levels.push({
-          price: value as number,
-          type: key.startsWith('R') ? 'resistance' : 'support',
-          strength: key.includes('4') || key.includes('3') ? 3 : 2,
-          source: `Camarilla ${key}`
-        });
-      }
+    
+    // TP Levels (extending upward from setup)
+    levels.push({
+      price: setup + (range * FIBONACCI_RATIOS.TP1),
+      label: 'TP1',
+      type: 'tp',
+      level: 'TP1',
+    });
+    
+    levels.push({
+      price: setup + (range * FIBONACCI_RATIOS.TP1_EXTENDED),
+      label: 'TP1 Ext',
+      type: 'tp',
+      level: 'TP1 Extended',
+    });
+    
+    levels.push({
+      price: setup + (range * FIBONACCI_RATIOS.TP2),
+      label: 'TP2',
+      type: 'tp',
+      level: 'TP2',
+    });
+    
+    levels.push({
+      price: setup + (range * FIBONACCI_RATIOS.TP2_EXTENDED),
+      label: 'TP2 Ext',
+      type: 'tp',
+      level: 'TP2 Extended',
+    });
+    
+    levels.push({
+      price: setup + (range * FIBONACCI_RATIOS.TP3),
+      label: 'TP3',
+      type: 'tp',
+      level: 'TP3',
+    });
+    
+    levels.push({
+      price: setup + (range * FIBONACCI_RATIOS.TP3_EXTENDED),
+      label: 'TP3 Ext',
+      type: 'tp',
+      level: 'TP3 Extended',
+    });
+  } else {
+    // BEARISH: Setup = swing high, Base = swing low
+    const base = swingLow;
+    const setup = swingHigh;
+    
+    levels.push({
+      price: base,
+      label: 'Base',
+      type: 'base',
+      level: 'Base',
+    });
+    
+    levels.push({
+      price: setup,
+      label: 'Setup',
+      type: 'setup',
+      level: 'Setup',
+    });
+    
+    // TP Levels (extending downward from setup)
+    levels.push({
+      price: setup - (range * FIBONACCI_RATIOS.TP1),
+      label: 'TP1',
+      type: 'tp',
+      level: 'TP1',
+    });
+    
+    levels.push({
+      price: setup - (range * FIBONACCI_RATIOS.TP1_EXTENDED),
+      label: 'TP1 Ext',
+      type: 'tp',
+      level: 'TP1 Extended',
+    });
+    
+    levels.push({
+      price: setup - (range * FIBONACCI_RATIOS.TP2),
+      label: 'TP2',
+      type: 'tp',
+      level: 'TP2',
+    });
+    
+    levels.push({
+      price: setup - (range * FIBONACCI_RATIOS.TP2_EXTENDED),
+      label: 'TP2 Ext',
+      type: 'tp',
+      level: 'TP2 Extended',
+    });
+    
+    levels.push({
+      price: setup - (range * FIBONACCI_RATIOS.TP3),
+      label: 'TP3',
+      type: 'tp',
+      level: 'TP3',
+    });
+    
+    levels.push({
+      price: setup - (range * FIBONACCI_RATIOS.TP3_EXTENDED),
+      label: 'TP3 Ext',
+      type: 'tp',
+      level: 'TP3 Extended',
     });
   }
   
-  // Add Bollinger Bands
-  levels.push({
-    price: bollinger.upper,
-    type: 'resistance',
-    strength: 2,
-    source: 'BB Upper'
-  });
-  
-  levels.push({
-    price: bollinger.lower,
-    type: 'support',
-    strength: 2,
-    source: 'BB Lower'
-  });
-  
-  // Add Semafor pivots (only strong ones)
-  semafor.filter(p => p.strength >= 2).forEach(pivot => {
-    levels.push({
-      price: pivot.price,
-      type: pivot.type === 'high' ? 'resistance' : 'support',
-      strength: pivot.strength,
-      source: `Semafor ${pivot.strength}`
-    });
-  });
-  
-  // Remove duplicates (levels within 0.1% of each other)
-  return consolidateLevels(levels);
+  return levels;
 }
 
-/**
- * Calculate FMCBR (Fibonacci, Murray Math, Camarilla, Bollinger, Resistance) levels
- * Combines all indicator types into unified support/resistance levels
- */
-export function calculateFMCBR(candles: Candle[]): FMCBRLevels | null {
-  if (!candles || candles.length < 20) return null;
+// ──── Step 5: Calculate Entry Levels ────
+function calculateFibonacciEntry(
+  swingHigh: number,
+  swingLow: number,
+  direction: 'BULLISH' | 'BEARISH'
+): { majorEntry: number; minorEntry: number } {
+  const range = Math.abs(swingHigh - swingLow);
   
-  try {
-    const fibonacci = calculateFibonacci(candles);
-    const murrayMath = calculateMurrayMath(candles);
-    const camarilla = calculateCamarilla(candles);
-    const bollinger = calculateBollingerBands(candles);
-    const semafor = calculateSemafor(candles);
-    
-    // Get current price for level classification
-    const currentPrice = candles[candles.length - 1]?.close || 0;
-    
-    // Combine all levels into key support/resistance
-    const keyLevels = identifyKeyLevels(
-      fibonacci,
-      murrayMath,
-      camarilla,
-      bollinger,
-      semafor,
-      currentPrice
-    );
+  if (direction === 'BULLISH') {
+    const base = swingHigh;
+    const distance = swingHigh - swingLow;
     
     return {
-      fibonacci,
-      murrayMath,
-      camarilla: camarilla || {
-        R4: 0, R3: 0, R2: 0, R1: 0, PP: 0,
-        S1: 0, S2: 0, S3: 0, S4: 0
+      majorEntry: base - (distance * FIBONACCI_RATIOS.MAJOR_ENTRY), // 0.236
+      minorEntry: base - (distance * FIBONACCI_RATIOS.MINOR_ENTRY), // 0.382
+    };
+  } else {
+    const base = swingLow;
+    const distance = swingHigh - swingLow;
+    
+    return {
+      majorEntry: base + (distance * FIBONACCI_RATIOS.MAJOR_ENTRY), // 0.236
+      minorEntry: base + (distance * FIBONACCI_RATIOS.MINOR_ENTRY), // 0.382
+    };
+  }
+}
+
+// ──── Main FMCBR Strategy ────
+export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
+  if (!candles || candles.length < 50) {
+    return null;
+  }
+  
+  try {
+    // Step 1: Detect IB or DB
+    // Look for breaks in the last 20 candles
+    let breakType: 'IB' | 'DB' | null = null;
+    let breakIndex = -1;
+    
+    for (let i = Math.max(0, candles.length - 20); i < candles.length - 1; i++) {
+      const break = detectBreak(candles, i);
+      if (break) {
+        breakType = break;
+        breakIndex = i;
+        break;
+      }
+    }
+    
+    if (!breakType || breakIndex === -1) {
+      return {
+        breakType: null,
+        cb1: false,
+        direction: null,
+        swingHigh: 0,
+        swingLow: 0,
+        base: 0,
+        setup: 0,
+        levels: [],
+        entryMajor: 0,
+        entryMinor: 0,
+        status: 'WAITING_BREAK',
+      };
+    }
+    
+    // Determine direction
+    const breakCandle = candles[breakIndex];
+    const direction: 'BULLISH' | 'BEARISH' = breakCandle.close > breakCandle.open ? 'BULLISH' : 'BEARISH';
+    
+    // Step 2: Detect CB1
+    const cb1Detected = detectCB1(candles, breakIndex);
+    
+    if (!cb1Detected) {
+      // Find swing points for potential setup
+      const window = candles.slice(Math.max(0, breakIndex - 20), breakIndex + 5);
+      let swingHigh = -Infinity;
+      let swingLow = Infinity;
+      
+      window.forEach(c => {
+        if (c.high > swingHigh) swingHigh = c.high;
+        if (c.low < swingLow) swingLow = c.low;
+      });
+      
+      return {
+        breakType,
+        cb1: false,
+        direction,
+        swingHigh,
+        swingLow,
+        base: 0,
+        setup: 0,
+        levels: [],
+        entryMajor: 0,
+        entryMinor: 0,
+        status: 'WAITING_CB1',
+      };
+    }
+    
+    // Step 3: Find swing points for Fibonacci calculation
+    const pattern = findABCPattern(candles, breakIndex);
+    if (!pattern) {
+      return {
+        breakType,
+        cb1: true,
+        direction,
+        swingHigh: 0,
+        swingLow: 0,
+        base: 0,
+        setup: 0,
+        levels: [],
+        entryMajor: 0,
+        entryMinor: 0,
+        status: 'WAITING_RETEST',
+      };
+    }
+    
+    const swingHigh = direction === 'BULLISH' ? pattern.A : pattern.B;
+    const swingLow = direction === 'BULLISH' ? pattern.B : pattern.A;
+    
+    // Step 4: Calculate Fibonacci levels
+    const tpLevels = calculateFibonacciTP(swingHigh, swingLow, direction);
+    const entryLevels = calculateFibonacciEntry(swingHigh, swingLow, direction);
+    
+    // Add entry levels to the levels array
+    const allLevels: FMCBRLevel[] = [
+      ...tpLevels,
+      {
+        price: entryLevels.majorEntry,
+        label: 'Major Entry (23.6%)',
+        type: 'entry',
+        level: 'Major Entry',
       },
-      bollinger,
-      keyLevels
+      {
+        price: entryLevels.minorEntry,
+        label: 'Minor Entry (38.2%)',
+        type: 'entry',
+        level: 'Minor Entry',
+      },
+    ];
+    
+    // Determine base and setup
+    const base = direction === 'BULLISH' ? swingHigh : swingLow;
+    const setup = direction === 'BULLISH' ? swingLow : swingHigh;
+    
+    return {
+      breakType,
+      cb1: true,
+      direction,
+      swingHigh,
+      swingLow,
+      base,
+      setup,
+      levels: allLevels.sort((a, b) => a.price - b.price),
+      entryMajor: entryLevels.majorEntry,
+      entryMinor: entryLevels.minorEntry,
+      status: 'READY',
     };
   } catch (error) {
     console.error('Error calculating FMCBR:', error);
