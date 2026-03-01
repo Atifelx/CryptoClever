@@ -17,6 +17,7 @@ import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
 import FMCBROverlay from './FMCBROverlay';
 import TrendIndicatorOverlay from './TrendIndicatorOverlay';
+import ScalpSignalOverlay from './ScalpSignalOverlay';
 import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
 
@@ -725,6 +726,13 @@ export default function TradingChart({
         <TrendIndicatorOverlay
           trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
           showTrend={isEnabled('trendIndicator')}
+        />
+        
+        {/* Scalp Signal Overlay - White circle below Trend Indicator arrow with pulsing glow */}
+        <ScalpSignalOverlay
+          scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
+          trendMarker={isEnabled('trendIndicator') ? trendMarker : null}
+          showScalp={isEnabled('scalpSignal')}
         />
         
         {/* Unified Marker Manager - Merges markers from all indicators */}

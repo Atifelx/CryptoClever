@@ -110,34 +110,13 @@ export default function UnifiedMarkerManager({
     // REMOVED: Trend indicator now renders as overlay at top of chart (see TrendIndicatorOverlay.tsx)
     // This prevents visibility issues with markers overlapping candles
 
-    // ──── SCALP SIGNAL MARKERS (white circle + arrow; WAIT = grey circle) ────
+    // ──── SCALP SIGNAL MARKERS ────
+    // REMOVED: White circle now renders as overlay below Trend Indicator arrow (see ScalpSignalOverlay.tsx)
+    // This prevents visibility issues with circle overlapping candles
+    // Only show WAIT status as marker if needed
     if (showScalp && scalpSignals && scalpSignals.length > 0) {
       for (const item of scalpSignals) {
-        if (item.signal === 'LONG' || item.signal === 'SHORT') {
-          const isBuy = item.signal === 'LONG';
-          const rsiText = item.rsi != null ? `RSI: ${item.rsi.toFixed(0)}` : '';
-          const tp2Text = `TP2: ${item.takeProfit2.toFixed(0)}`;
-          const slText = `SL: ${item.stopLoss.toFixed(0)}`;
-          const label = `Scalp ${item.signal}${rsiText ? ` | ${rsiText}` : ''} | ${tp2Text} | ${slText}`;
-
-          allMarkers.push({
-            time: item.time as any,
-            position: isBuy ? 'belowBar' : 'aboveBar',
-            color: '#FFFFFF',
-            shape: 'circle',
-            size: 2.5,
-            text: label,
-          });
-
-          const arrowColor = isBuy ? '#4CAF50' : '#F44336';
-          allMarkers.push({
-            time: item.time as any,
-            position: isBuy ? 'belowBar' : 'aboveBar',
-            color: arrowColor,
-            shape: isBuy ? 'arrowUp' : 'arrowDown',
-            size: 2.0,
-          });
-        } else {
+        if (item.signal === 'WAIT') {
           // WAIT: show one grey circle so the indicator is visible
           allMarkers.push({
             time: item.time as any,
@@ -148,6 +127,7 @@ export default function UnifiedMarkerManager({
             text: `Scalp: WAIT (${item.reason})`,
           });
         }
+        // LONG/SHORT signals now render in ScalpSignalOverlay component
       }
     }
 
