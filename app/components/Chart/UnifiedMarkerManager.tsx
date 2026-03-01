@@ -25,8 +25,10 @@ export default function UnifiedMarkerManager({
   candleSeries,
   semaforPoints,
   scalpSignals,
+  trendMarker,
   showSemafor,
   showScalp,
+  showTrend,
 }: UnifiedMarkerManagerProps) {
   const markersRef = useRef<any[]>([]);
 
