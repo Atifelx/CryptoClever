@@ -67,7 +67,7 @@ export default function FMCBROverlay({
 
     const scheme = direction === 'BULLISH' ? colors.bullish : colors.bearish;
 
-    // Render all levels
+    // Render all levels as clean horizontal lines
     levels.forEach(level => {
       let color = '#888888';
       let lineWidth = 1;
@@ -108,20 +108,6 @@ export default function FMCBROverlay({
       
       priceLinesRef.current.push(line);
     });
-
-    // Add status indicator line (current price area)
-    if (signal.entryMajor > 0) {
-      // Show entry zone highlight
-      const entryLine = candleSeries.createPriceLine({
-        price: signal.entryMajor,
-        color: scheme.entry,
-        lineWidth: 2,
-        lineStyle: 1,
-        axisLabelVisible: true,
-        title: `Entry Zone (${direction})`,
-      });
-      priceLinesRef.current.push(entryLine);
-    }
 
   }, [candleSeries, signal, showFMCBR]);
 
