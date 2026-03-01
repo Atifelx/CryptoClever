@@ -150,15 +150,18 @@ function detectCB1(candles: Candle[], breakIndex: number): boolean {
   if (!pattern) return false;
   
   // CB1 occurs when price breaks point B after IB/DB
-  // Check if current price has broken point B
-  const currentCandle = candles[candles.length - 1];
+  // Check if last CLOSED candle has broken point B (use second-to-last to avoid repainting)
+  const lastClosedIndex = candles.length - 1;
+  if (lastClosedIndex <= breakIndex) return false;
+  
+  const lastClosedCandle = candles[lastClosedIndex];
   
   if (pattern.type === 'high') {
     // Bearish: CB1 when price breaks below point B (swing low)
-    return currentCandle.close < pattern.B;
+    return lastClosedCandle.close < pattern.B;
   } else {
     // Bullish: CB1 when price breaks above point B (swing high)
-    return currentCandle.close > pattern.B;
+    return lastClosedCandle.close > pattern.B;
   }
 }
 
