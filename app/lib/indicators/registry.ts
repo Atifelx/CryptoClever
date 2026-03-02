@@ -46,6 +46,16 @@ export const INDICATOR_REGISTRY: Record<string, IndicatorConfig> = {
     hasSettings: true,
     icon: '📈',
   },
+  // QuickScalp 2.0 Indicator
+  quickScalp2: {
+    id: 'quickScalp2',
+    name: 'QuickScalp 2.0',
+    category: 'support-resistance',
+    description: 'Advanced scalping algorithm with order flow, price patterns, multi-timeframe confluence, and market regime detection',
+    defaultEnabled: false,
+    hasSettings: true,
+    icon: '🚀',
+  },
 };
 
 /**

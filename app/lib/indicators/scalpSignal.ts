@@ -276,6 +276,38 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     return { signal: 'WAIT', reason: 'Calculating indicators...' };
   }
 
+  // ──── TREND FILTERING (Prevent counter-trend signals) ────
+  // Analyze last 15 candles to detect clear trend direction
+  const trendLookback = Math.min(15, data.length);
+  const trendCandles = data.slice(-trendLookback);
+  const trendCloses = trendCandles.map(c => c.close);
+  
+  // Count bullish vs bearish candles
+  let bullishCandles = 0;
+  let bearishCandles = 0;
+  let priceChange = 0;
+  
+  for (let i = 1; i < trendCandles.length; i++) {
+    const prevClose = trendCloses[i - 1];
+    const currClose = trendCloses[i];
+    if (currClose > prevClose) {
+      bullishCandles++;
+      priceChange += (currClose - prevClose) / prevClose;
+    } else if (currClose < prevClose) {
+      bearishCandles++;
+      priceChange -= (prevClose - currClose) / prevClose;
+    }
+  }
+  
+  // Determine trend consensus (70% threshold for clear trend)
+  const totalCandles = trendLookback - 1;
+  const bullishRatio = bullishCandles / totalCandles;
+  const bearishRatio = bearishCandles / totalCandles;
+  const netPriceChange = (trendCloses[trendCloses.length - 1] - trendCloses[0]) / trendCloses[0];
+  
+  const isClearUptrend = bullishRatio >= 0.7 && netPriceChange > 0.001; // 70% bullish + price up >0.1%
+  const isClearDowntrend = bearishRatio >= 0.7 && netPriceChange < -0.001; // 70% bearish + price down >0.1%
+  
   // ──── SWING REVERSAL DETECTION (Last 5 candles) ────
   // Fast detection for quick trade entry
   let swingReversalLong = false;
@@ -297,49 +329,57 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       }
     }
     
-    // Detect swing high reversal (potential SHORT)
-    const highs = recentCandles.map(c => c.high);
-    const maxHighIndex = highs.indexOf(Math.max(...highs));
-    
-    // Swing high reversal: highest point in middle, then price moves down
-    if (maxHighIndex >= 1 && maxHighIndex <= 3) {
-      const swingHigh = highs[maxHighIndex];
-      const afterSwing = closes.slice(maxHighIndex + 1);
-      // Check if price dropped after swing high
-      if (afterSwing.length > 0 && afterSwing[afterSwing.length - 1] < swingHigh * 0.999) {
-        swingReversalShort = true;
+    // Detect swing high reversal (potential SHORT) - ONLY if not in clear uptrend
+    if (!isClearUptrend) {
+      const highs = recentCandles.map(c => c.high);
+      const maxHighIndex = highs.indexOf(Math.max(...highs));
+      
+      // Swing high reversal: highest point in middle, then price moves down
+      if (maxHighIndex >= 1 && maxHighIndex <= 3) {
+        const swingHigh = highs[maxHighIndex];
+        const afterSwing = closes.slice(maxHighIndex + 1);
+        // Check if price dropped after swing high
+        if (afterSwing.length > 0 && afterSwing[afterSwing.length - 1] < swingHigh * 0.999) {
+          swingReversalShort = true;
+        }
       }
     }
   }
 
   // LONG signal conditions (RELAXED for 1-minute scalping)
   // For 1-minute candles, we need faster signals - relaxed thresholds
+  // ENFORCE: Only allow LONG if NOT in clear downtrend
   const longConditions = [
-    currentEMAFast > currentEMASlow, // Uptrend
-    prevEMAFast <= prevEMASlow || (currentEMAFast > currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005), // EMA crossover OR strong trend (>0.05% separation)
+    !isClearDowntrend, // CRITICAL: Block LONG signals during clear downtrends
+    currentEMAFast > currentEMASlow || isClearUptrend, // Uptrend OR clear uptrend from candles
+    prevEMAFast <= prevEMASlow || (currentEMAFast > currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005) || isClearUptrend, // EMA crossover OR strong trend OR clear uptrend
     currentRSI > 35 && currentRSI < 75, // RSI relaxed range (was 40-70)
-    currentClose > currentVWAP * 0.9995, // Price near or above VWAP (relaxed from exact >)
+    currentClose > currentVWAP * 0.9995 || isClearUptrend, // Price near or above VWAP OR clear uptrend
     volumeRatio > 0.8, // Volume relaxed: >0.8x average (was >1.2x) for 1-minute scalping
-    currentMomentum > -0.1, // Positive or slightly negative momentum (was >0)
+    currentMomentum > -0.1 || isClearUptrend, // Positive or slightly negative momentum OR clear uptrend
   ];
 
   // SHORT signal conditions (RELAXED for 1-minute scalping)
+  // ENFORCE: Only allow SHORT if NOT in clear uptrend
   const shortConditions = [
-    currentEMAFast < currentEMASlow, // Downtrend
-    prevEMAFast >= prevEMASlow || (currentEMAFast < currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005), // EMA crossover OR strong trend
+    !isClearUptrend, // CRITICAL: Block SHORT signals during clear uptrends
+    currentEMAFast < currentEMASlow || isClearDowntrend, // Downtrend OR clear downtrend from candles
+    prevEMAFast >= prevEMASlow || (currentEMAFast < currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005) || isClearDowntrend, // EMA crossover OR strong trend OR clear downtrend
     currentRSI < 65 && currentRSI > 25, // RSI relaxed range (was 30-60)
-    currentClose < currentVWAP * 1.0005, // Price near or below VWAP (relaxed)
+    currentClose < currentVWAP * 1.0005 || isClearDowntrend, // Price near or below VWAP OR clear downtrend
     volumeRatio > 0.8, // Volume relaxed: >0.8x average (was >1.2x)
-    currentMomentum < 0.1, // Negative or slightly positive momentum (was <0)
+    currentMomentum < 0.1 || isClearDowntrend, // Negative or slightly positive momentum OR clear downtrend
   ];
 
   // Bollinger Band mean reversion signals (more aggressive)
-  const bbLong = currentClose < currentBBLower && currentRSI < 40; // Relaxed from 35
-  const bbShort = currentClose > currentBBUpper && currentRSI > 60; // Relaxed from 65
+  // ENFORCE trend filtering: BB signals only valid if aligned with trend
+  const bbLong = currentClose < currentBBLower && currentRSI < 40 && !isClearDowntrend; // Relaxed from 35, but block in downtrend
+  const bbShort = currentClose > currentBBUpper && currentRSI > 60 && !isClearUptrend; // Relaxed from 65, but block in uptrend
 
   // Strong momentum signals (for fast 1-minute scalping)
-  const strongMomentumLong = currentMomentum > 0.3 && currentEMAFast > currentEMASlow && volumeRatio > 0.6;
-  const strongMomentumShort = currentMomentum < -0.3 && currentEMAFast < currentEMASlow && volumeRatio > 0.6;
+  // ENFORCE trend filtering: Momentum signals must align with trend
+  const strongMomentumLong = currentMomentum > 0.3 && (currentEMAFast > currentEMASlow || isClearUptrend) && volumeRatio > 0.6 && !isClearDowntrend;
+  const strongMomentumShort = currentMomentum < -0.3 && (currentEMAFast < currentEMASlow || isClearDowntrend) && volumeRatio > 0.6 && !isClearUptrend;
 
   // Generate signal
   const longScore = longConditions.filter(Boolean).length;
@@ -382,7 +422,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       rsi: currentRSI,
       volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.0 ? 'MODERATE' : 'NORMAL',
     };
-  } else if (shortScore >= 4 || bbShort || strongMomentumShort || swingReversalShort) {
+  } else if ((shortScore >= 4 || bbShort || strongMomentumShort || swingReversalShort) && !isClearUptrend) {
     // SHORT signal
     const stopLoss = currentClose * (1 + STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 - TAKE_PROFIT_PCT);

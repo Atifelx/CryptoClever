@@ -6,6 +6,7 @@ import { SemaforPoint } from '../../lib/indicators/types';
 import type { ScalpDisplayItem } from '../../lib/indicators/scalpSignal';
 import type { TrendMarker } from '../../lib/indicators/trendIndicator';
 import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
+import type { QuickScalp2DisplayItem } from '../../lib/indicators/quickScalp2';
 
 interface UnifiedMarkerManagerProps {
   candleSeries: ISeriesApi<'Candlestick'> | null;
@@ -13,11 +14,13 @@ interface UnifiedMarkerManagerProps {
   scalpSignals: ScalpDisplayItem[];
   trendMarker: TrendMarker | null;
   fmcbrSignal: FMCBRSignal | null;
+  quickScalp2Signals: QuickScalp2DisplayItem[];
   currentCandleTime?: number; // Current candle time for FMCBR markers
   showSemafor: boolean;
   showScalp: boolean;
   showTrend: boolean;
   showFMCBR: boolean;
+  showQuickScalp2: boolean;
 }
 
 /**
@@ -31,11 +34,13 @@ export default function UnifiedMarkerManager({
   scalpSignals,
   trendMarker,
   fmcbrSignal,
+  quickScalp2Signals,
   currentCandleTime,
   showSemafor,
   showScalp,
   showTrend,
   showFMCBR,
+  showQuickScalp2,
 }: UnifiedMarkerManagerProps) {
   const markersRef = useRef<any[]>([]);
 
@@ -143,6 +148,120 @@ export default function UnifiedMarkerManager({
             text: `Scalp: WAIT (${item.reason})`,
           });
         }
+      }
+    }
+
+    // ──── QUICKSCALP 2.0 MARKERS ────
+    if (showQuickScalp2) {
+      // Get reference time for fallback rendering
+      let referenceTime: number | null = currentCandleTime || null;
+      if (referenceTime === null) {
+        if (semaforPoints.length > 0) {
+          referenceTime = semaforPoints[semaforPoints.length - 1].time;
+        } else if (scalpSignals.length > 0) {
+          referenceTime = scalpSignals[scalpSignals.length - 1].time;
+        } else if (trendMarker) {
+          referenceTime = trendMarker.time;
+        } else {
+          // Final fallback: use current timestamp
+          referenceTime = Math.floor(Date.now() / 1000);
+        }
+      }
+      
+      if (quickScalp2Signals && quickScalp2Signals.length > 0) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[QuickScalp2.0] Rendering markers:', {
+            showQuickScalp2,
+            signalsCount: quickScalp2Signals.length,
+            signals: quickScalp2Signals.map(s => ({ 
+              signal: s.signal, 
+              time: s.time,
+              timeValid: s.time > 0,
+            })),
+            referenceTime,
+          });
+        }
+        
+        for (const item of quickScalp2Signals) {
+          // Ensure time is valid - use reference time as fallback
+          let markerTime = item.time;
+          if (!markerTime || markerTime === 0) {
+            markerTime = referenceTime || Math.floor(Date.now() / 1000);
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('[QuickScalp2.0] Using fallback time for marker:', markerTime);
+            }
+          }
+          
+          if (item.signal === 'LONG' || item.signal === 'SHORT') {
+            // Type guard: this is a QuickScalp2Marker
+            const marker = item as Extract<typeof item, { signal: 'LONG' | 'SHORT' }>;
+            const isBuy = marker.signal === 'LONG';
+            const signalStrength = marker.signalStrength;
+            const confidence = marker.confidence;
+            const regime = (marker as any).regime || '';
+            
+            // Color based on signal strength and direction
+            const arrowColor = isBuy ? '#00ff66' : '#ff2222';
+            const circleColor = isBuy ? '#4CAF50' : '#F44336';
+            
+            // Size based on signal strength
+            const size = Math.min(3.0, Math.max(2.0, Math.abs(signalStrength) / 30));
+            
+            // Label with key info
+            const label = `QS2.0 ${marker.signal} | Strength: ${signalStrength.toFixed(0)} | Conf: ${confidence}%${regime ? ` | ${regime}` : ''}`;
+            
+            // Circle marker
+            allMarkers.push({
+              time: markerTime as any,
+              position: isBuy ? 'belowBar' : 'aboveBar',
+              color: circleColor,
+              shape: 'circle',
+              size: size,
+              text: label,
+            });
+            
+            // Directional arrow
+            allMarkers.push({
+              time: markerTime as any,
+              position: 'inBar',
+              color: arrowColor,
+              shape: isBuy ? 'arrowUp' : 'arrowDown',
+              size: size - 0.5,
+            });
+          } else if (item.signal === 'WAIT') {
+            // WAIT: show grey circle (always render so indicator is visible)
+            // Ensure WAIT signals render even with time=0
+            const waitItem = item as Extract<typeof item, { signal: 'WAIT' }>;
+            allMarkers.push({
+              time: markerTime as any,
+              position: 'belowBar',
+              color: '#888888',
+              shape: 'circle',
+              size: 2.0,
+              text: `QS2.0: WAIT${waitItem.reason ? ` (${waitItem.reason.substring(0, 50)})` : ''}`,
+            });
+          }
+        }
+      } else {
+        // Fallback rendering: Indicator is enabled but no signals - render WAIT marker
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[QuickScalp2.0] No signals to render, adding fallback WAIT marker:', {
+            showQuickScalp2,
+            signalsCount: quickScalp2Signals?.length || 0,
+            hasSignals: !!quickScalp2Signals,
+            referenceTime,
+          });
+        }
+        
+        // Render a WAIT marker so the indicator is visible
+        allMarkers.push({
+          time: (referenceTime || Math.floor(Date.now() / 1000)) as any,
+          position: 'belowBar',
+          color: '#888888',
+          shape: 'circle',
+          size: 2.0,
+          text: 'QS2.0: WAIT (Calculating...)',
+        });
       }
     }
 
@@ -277,7 +396,7 @@ export default function UnifiedMarkerManager({
     } catch (error) {
       console.error('Unified marker error:', error);
     }
-  }, [candleSeries, semaforPoints, scalpSignals, trendMarker, fmcbrSignal, currentCandleTime, showSemafor, showScalp, showTrend, showFMCBR]);
+  }, [candleSeries, semaforPoints, scalpSignals, trendMarker, fmcbrSignal, quickScalp2Signals, currentCandleTime, showSemafor, showScalp, showTrend, showFMCBR, showQuickScalp2]);
 
   return null;
 }

@@ -109,9 +109,9 @@ export default function TrendIndicatorOverlay({
 
         {/* White Circle + Scalp Signal Text - Circle on left, text on right */}
         {latestScalpSignal && (latestScalpSignal.signal === 'LONG' || latestScalpSignal.signal === 'SHORT') && (
-          <div className="flex items-start gap-2 mt-1">
-            {/* Pulsing White Circle - positioned on LEFT side, at TOP */}
-            <div className="relative flex-shrink-0 mt-1">
+          <div className="flex items-center -mr-3">
+            {/* Pulsing White Circle - positioned on LEFT side, perfectly aligned */}
+            <div className="relative flex-shrink-0 z-10">
               {/* Outer glow ring (pulsing) */}
               <div 
                 className="absolute inset-0 rounded-full animate-ping"
@@ -144,8 +144,8 @@ export default function TrendIndicatorOverlay({
               />
             </div>
             
-            {/* Signal Label - positioned to the RIGHT of circle, aligned at TOP */}
-            <div className="px-3 py-1 rounded bg-black/80 backdrop-blur-sm border border-white/20">
+            {/* Signal Label - positioned to the RIGHT of circle, overlapping ~20% */}
+            <div className="px-3 py-1 rounded bg-black/80 backdrop-blur-sm border border-white/20 -ml-3">
               <span className="text-xs font-semibold text-white whitespace-nowrap">
                 Scalp {latestScalpSignal.signal}
                 {latestScalpSignal.rsi != null ? ` | RSI: ${latestScalpSignal.rsi.toFixed(0)}` : ''}

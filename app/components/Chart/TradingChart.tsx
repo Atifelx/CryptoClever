@@ -14,6 +14,8 @@ import { getTrendDisplayItem } from '../../lib/indicators/trendIndicator';
 import type { TrendMarker } from '../../lib/indicators/trendIndicator';
 import { calculateFMCBR } from '../../lib/indicators/fmcbr';
 import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
+import { generateQuickScalp2Signal, getQuickScalp2DisplayItems } from '../../lib/indicators/quickScalp2';
+import type { QuickScalp2DisplayItem } from '../../lib/indicators/quickScalp2';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
 import FMCBROverlay from './FMCBROverlay';
 import TrendIndicatorOverlay from './TrendIndicatorOverlay';
@@ -178,6 +180,97 @@ export default function TradingChart({
     candles[candles.length - 1]?.time,
     candles[candles.length - 1]?.close,
     isLoading,
+  ]);
+
+  // QuickScalp 2.0 Indicator — Advanced scalping algorithm with order flow and market regime detection
+  const quickScalp2Signals = useMemo((): QuickScalp2DisplayItem[] => {
+    // Use enabledIndicators directly since isEnabled is defined later
+    const isIndicatorEnabled = enabledIndicators.has('quickScalp2');
+    
+    if (typeof window === 'undefined') {
+      if (process.env.NODE_ENV === 'development' && isIndicatorEnabled) {
+        console.log('[QuickScalp2.0] Server-side render - skipping');
+      }
+      return [];
+    }
+    
+    if (!isIndicatorEnabled) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[QuickScalp2.0] Indicator disabled');
+      }
+      return [];
+    }
+    
+    if (isLoading || candles.length < 301) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[QuickScalp2.0] Waiting for data:', { 
+          isLoading, 
+          candlesLength: candles.length,
+          required: 301,
+          enabled: isIndicatorEnabled,
+        });
+      }
+      return []; // need 300+ closed => 301+ total (for stable signals)
+    }
+
+    try {
+      const result = generateQuickScalp2Signal(candles);
+      
+      // Fix time value handling - ensure lastClosedTime is never 0 or invalid
+      let lastClosedTime = candles[candles.length - 2]?.time;
+      if (!lastClosedTime || lastClosedTime === 0) {
+        // Fallback to current candle time if last closed time is invalid
+        lastClosedTime = candles[candles.length - 1]?.time;
+        if (!lastClosedTime || lastClosedTime === 0) {
+          // Final fallback: use current timestamp
+          lastClosedTime = Math.floor(Date.now() / 1000);
+        }
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[QuickScalp2.0] Using fallback time:', lastClosedTime);
+        }
+      }
+      
+      const displayItems = getQuickScalp2DisplayItems(result, lastClosedTime);
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[QuickScalp2.0] Signal generated:', {
+          enabled: isIndicatorEnabled,
+          signal: result.signal,
+          strength: result.signalStrength,
+          confidence: result.confidence,
+          regime: result.regime,
+          reason: result.reason?.substring(0, 100),
+          displayItemsCount: displayItems.length,
+          lastClosedTime,
+          timeValid: lastClosedTime > 0,
+          displayItems: displayItems.map(item => ({
+            signal: item.signal,
+            time: item.time,
+            hasTime: item.time > 0,
+          })),
+        });
+      }
+      
+      return displayItems;
+    } catch (error) {
+      console.error('[QuickScalp2.0] Calculation error:', error);
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[QuickScalp2.0] Error details:', {
+          enabled: isIndicatorEnabled,
+          candlesLength: candles.length,
+          isLoading,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return [];
+    }
+  }, [
+    candles.length,
+    candles[candles.length - 2]?.time,
+    candles[candles.length - 2]?.close,
+    candles[candles.length - 1]?.time,
+    isLoading,
+    enabledIndicators, // Add dependency to recalculate when indicator is toggled
   ]);
 
   // Expose indicator data to parent component (deferred to avoid setState-during-render)
@@ -741,11 +834,13 @@ export default function TradingChart({
               scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
               trendMarker={null} // Trend indicator now uses overlay, not markers
               fmcbrSignal={keepLiveAnalysis ? fmcbrSignal : null}
+              quickScalp2Signals={isEnabled('quickScalp2') ? quickScalp2Signals : []}
               currentCandleTime={candles.length > 0 ? candles[candles.length - 1]?.time : undefined}
               showSemafor={isEnabled('semafor')}
               showScalp={isEnabled('scalpSignal')}
               showTrend={false} // Trend indicator now uses overlay, not markers
               showFMCBR={keepLiveAnalysis}
+              showQuickScalp2={isEnabled('quickScalp2')}
             />
             {/* FMCBR Price Lines Overlay - Shows horizontal lines for levels */}
             <FMCBROverlay
