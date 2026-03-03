@@ -57,6 +57,83 @@ function calculateSMA(data: number[], period: number): number[] {
   return sma;
 }
 
+// ─── Helpers for trend scoring ───
+
+function computeSlopePercent(series: number[], candles: number): number {
+  if (series.length < 2) return 0;
+  const period = Math.min(candles, series.length - 1);
+  const endIndex = series.length - 1;
+  const startIndex = Math.max(0, endIndex - period);
+  const start = series[startIndex];
+  const end = series[endIndex];
+  if (start === 0) return 0;
+  return ((end - start) / start) * 100;
+}
+
+interface SwingPoint {
+  index: number;
+  price: number;
+}
+
+function findSwingPoints(
+  closes: number[],
+  lookback: number
+): { highs: SwingPoint[]; lows: SwingPoint[] } {
+  const highs: SwingPoint[] = [];
+  const lows: SwingPoint[] = [];
+  if (closes.length < 5) return { highs, lows };
+
+  const start = Math.max(2, closes.length - lookback);
+  const end = closes.length - 2;
+
+  for (let i = start; i < end; i++) {
+    const c0 = closes[i - 2];
+    const c1 = closes[i - 1];
+    const c2 = closes[i];
+    const c3 = closes[i + 1];
+    const c4 = closes[i + 2];
+
+    const isHigh = c2 > c1 && c2 > c3 && c2 >= c0 && c2 >= c4;
+    const isLow = c2 < c1 && c2 < c3 && c2 <= c0 && c2 <= c4;
+
+    if (isHigh) highs.push({ index: i, price: c2 });
+    if (isLow) lows.push({ index: i, price: c2 });
+  }
+
+  return { highs, lows };
+}
+
+type StructureBias = 'UP' | 'DOWN' | 'NEUTRAL';
+
+function getStructureBias(
+  highs: SwingPoint[],
+  lows: SwingPoint[]
+): StructureBias {
+  const recentHighs = highs.slice(-6);
+  const recentLows = lows.slice(-6);
+
+  let hh = 0;
+  let lh = 0;
+  for (let i = 1; i < recentHighs.length; i++) {
+    if (recentHighs[i].price > recentHighs[i - 1].price) hh++;
+    else if (recentHighs[i].price < recentHighs[i - 1].price) lh++;
+  }
+
+  let hl = 0;
+  let ll = 0;
+  for (let i = 1; i < recentLows.length; i++) {
+    if (recentLows[i].price > recentLows[i - 1].price) hl++;
+    else if (recentLows[i].price < recentLows[i - 1].price) ll++;
+  }
+
+  const upScore = hh + hl;
+  const downScore = ll + lh;
+
+  if (upScore >= 3 && upScore >= downScore + 1) return 'UP';
+  if (downScore >= 3 && downScore >= upScore + 1) return 'DOWN';
+  return 'NEUTRAL';
+}
+
 /**
  * Identify trend from candle data
  * @param candles Array of candles (needs at least 200 candles for EMA200)
@@ -85,17 +162,9 @@ export function identifyTrendWithVolume(candles: Candle[]): TrendInfo | null {
   const currentEMA50 = ema50[ema50.length - 1];
   const currentEMA200 = ema200[ema200.length - 1];
 
-  // Calculate EMA20 slope over last 10 candles
-  const slopePeriod = Math.min(10, ema20.length - 1);
-  const slopeStart = ema20.length - slopePeriod - 1;
-  const slopeEnd = ema20.length - 1;
-  
-  let slope = 0;
-  if (slopeStart >= 0 && slopeEnd > slopeStart) {
-    const startValue = ema20[slopeStart];
-    const endValue = ema20[slopeEnd];
-    slope = ((endValue - startValue) / startValue) * 100; // Percentage change
-  }
+  // EMA slopes: short and long horizon (percentage)
+  const slopeShort = computeSlopePercent(ema20, 10);
+  const slopeLong = computeSlopePercent(ema20, 50);
 
   // Calculate volume average (SMA50 of volume)
   const volumeSMA50 = calculateSMA(volumes, 50);
@@ -103,56 +172,89 @@ export function identifyTrendWithVolume(candles: Candle[]): TrendInfo | null {
   const currentVolume = volumes[volumes.length - 1];
   const volumeRatio = volumeAverage > 0 ? currentVolume / volumeAverage : 1;
 
+  // Swing structure (higher highs / higher lows vs lower highs / lower lows)
+  const swingWindow = Math.min(closes.length, 200);
+  const recentCloses = closes.slice(-swingWindow);
+  const { highs, lows } = findSwingPoints(recentCloses, swingWindow);
+  const structureBias = getStructureBias(highs, lows);
+
   // Determine trend
   let trend: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS' = 'SIDEWAYS';
   let action: 'BUY_ALLOWED' | 'NO_BUY' = 'NO_BUY';
   let confidence = 50;
 
-  // UPTREND: EMA20 > EMA50 > EMA200 AND price > EMA20 AND volume > 80% of average
-  const isUptrend = 
-    currentEMA20 > currentEMA50 && 
-    currentEMA50 > currentEMA200 && 
-    currentPrice > currentEMA20 &&
-    volumeRatio > 0.8;
+  // Scores from EMAs and slopes
+  let emaUpScore = 0;
+  let emaDownScore = 0;
 
-  // DOWNTREND: EMA20 < EMA50 < EMA200 AND price < EMA20
-  const isDowntrend = 
-    currentEMA20 < currentEMA50 && 
-    currentEMA50 < currentEMA200 && 
-    currentPrice < currentEMA20;
+  if (currentEMA20 > currentEMA50) emaUpScore += 2;
+  if (currentEMA50 > currentEMA200) emaUpScore += 1;
+  if (currentEMA20 < currentEMA50) emaDownScore += 2;
+  if (currentEMA50 < currentEMA200) emaDownScore += 1;
 
-  if (isUptrend) {
+  if (slopeShort > 0.15) emaUpScore += 1;
+  if (slopeShort < -0.15) emaDownScore += 1;
+  if (slopeLong > 0.3) emaUpScore += 2;
+  if (slopeLong < -0.3) emaDownScore += 2;
+
+  // Scores from swing structure
+  let structureUpScore = 0;
+  let structureDownScore = 0;
+  if (structureBias === 'UP') structureUpScore += 3;
+  else if (structureBias === 'DOWN') structureDownScore += 3;
+
+  const upTotal = emaUpScore + structureUpScore;
+  const downTotal = emaDownScore + structureDownScore;
+
+  const emaSpread = Math.abs(currentEMA20 - currentEMA50) / currentPrice;
+
+  // Decide trend based on combined scores
+  if (upTotal >= 3 && upTotal >= downTotal + 1) {
     trend = 'UPTREND';
     action = 'BUY_ALLOWED';
-    
-    // Calculate confidence based on slope and volume
-    let conf = 70; // Base confidence
-    if (slope > 0.5) conf += 15; // Strong slope
-    if (slope > 1.0) conf += 10; // Very strong slope
-    if (volumeRatio > 1.0) conf += 5; // Above average volume
-    confidence = Math.min(100, conf);
-  } else if (isDowntrend) {
+  } else if (downTotal >= 3 && downTotal >= upTotal + 1) {
     trend = 'DOWNTREND';
     action = 'NO_BUY';
-    
-    // Calculate confidence for downtrend
-    let conf = 70; // Base confidence
-    if (slope < -0.5) conf += 15; // Strong negative slope
-    if (slope < -1.0) conf += 10; // Very strong negative slope
-    confidence = Math.min(100, conf);
   } else {
-    // SIDEWAYS: EMAs are tangled or flat
-    trend = 'SIDEWAYS';
-    action = 'NO_BUY';
-    
-    // Lower confidence for sideways
-    confidence = 50;
-    
-    // Check if EMAs are very close (flat)
-    const emaSpread = Math.abs(currentEMA20 - currentEMA50) / currentPrice;
-    if (emaSpread < 0.01) { // Less than 1% spread
-      confidence = 40; // Very flat
+    // SIDEWAYS: flat EMAs and neutral structure
+    const flatSlope = Math.abs(slopeLong) < 0.2 && Math.abs(slopeShort) < 0.1;
+    const noStructureBias = structureBias === 'NEUTRAL';
+    if (flatSlope && noStructureBias && emaSpread < 0.01) {
+      trend = 'SIDEWAYS';
+      action = 'NO_BUY';
+    } else if (upTotal > downTotal) {
+      trend = 'UPTREND';
+      action = 'BUY_ALLOWED';
+    } else if (downTotal > upTotal) {
+      trend = 'DOWNTREND';
+      action = 'NO_BUY';
+    } else {
+      trend = 'SIDEWAYS';
+      action = 'NO_BUY';
     }
+  }
+
+  // Confidence
+  if (trend === 'UPTREND') {
+    let conf = 60;
+    conf += emaUpScore * 5;
+    if (structureBias === 'UP') conf += 10;
+    if (volumeRatio > 1.0) conf += 5;
+    if (volumeRatio < 0.7) conf -= 5;
+    if (emaSpread < 0.005) conf -= 10;
+    confidence = Math.max(40, Math.min(100, conf));
+  } else if (trend === 'DOWNTREND') {
+    let conf = 60;
+    conf += emaDownScore * 5;
+    if (structureBias === 'DOWN') conf += 10;
+    if (volumeRatio > 1.0) conf += 5;
+    if (volumeRatio < 0.7) conf -= 5;
+    if (emaSpread < 0.005) conf -= 10;
+    confidence = Math.max(40, Math.min(100, conf));
+  } else {
+    let conf = 50;
+    if (emaSpread < 0.005) conf = 40;
+    confidence = conf;
   }
 
   return {
@@ -164,7 +266,7 @@ export function identifyTrendWithVolume(candles: Candle[]): TrendInfo | null {
       ema50: currentEMA50,
       ema200: currentEMA200,
       currentPrice,
-      slope,
+      slope: slopeLong,
       volumeRatio,
       volumeAverage,
     },

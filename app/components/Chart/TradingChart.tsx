@@ -48,7 +48,9 @@ export default function TradingChart({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const [showBackendUnavailable, setShowBackendUnavailable] = useState(false);
   const [currentPrice, setCurrentPrice] = useState<number>(0);
-  const [candleSize, setCandleSize] = useState<number>(3);
+  // Default zoom level (bar spacing) – tuned to match design screenshot.
+  // Larger value => more zoomed-in view (fewer candles on screen).
+  const [candleSize, setCandleSize] = useState<number>(6);
   const userInteractedRef = useRef<boolean>(false);
   const isPanningRef = useRef<boolean>(false);
   const panStartXRef = useRef<number>(0);
@@ -339,7 +341,7 @@ export default function TradingChart({
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 5,
-        barSpacing: 4, // Medium spacing - shows ~120-150 candles (4-5 hours for 1m)
+        barSpacing: 6, // Default zoom – shows ~70-90 candles (2-3 hours for 1m)
         fixLeftEdge: false,
         fixRightEdge: false,
         lockVisibleTimeRangeOnResize: false,
@@ -629,9 +631,9 @@ export default function TradingChart({
               setTimeout(() => {
                 try {
                   if (chartRef.current && candlestickData.length > 0) {
-                    // Set zoom to show ~120 candles (4 hours for 1m timeframe) - matches image
-                    // This shows approximately 4-5 hours of data, perfect for scalping view
-                    const visibleCandles = 120;
+                    // Set zoom to show a focused window of candles for scalping.
+                    // With current barSpacing, ~80 candles gives the desired default view.
+                    const visibleCandles = 80;
                     const lastTime = candlestickData[candlestickData.length - 1].time as number;
                     const firstVisibleIndex = Math.max(0, candlestickData.length - visibleCandles);
                     const firstTime = candlestickData[firstVisibleIndex].time as number;
