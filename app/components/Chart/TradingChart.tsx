@@ -201,16 +201,16 @@ export default function TradingChart({
       return [];
     }
     
-    if (isLoading || candles.length < 301) {
+    if (isLoading || candles.length < 121) {
       if (process.env.NODE_ENV === 'development') {
         console.log('[QuickScalp2.0] Waiting for data:', { 
           isLoading, 
           candlesLength: candles.length,
-          required: 301,
+          required: 121,
           enabled: isIndicatorEnabled,
         });
       }
-      return []; // need 300+ closed => 301+ total (for stable signals)
+      return []; // need 120+ closed => 121+ total (RSI 21, MACD, Stoch, VWAP 60, BB)
     }
 
     try {

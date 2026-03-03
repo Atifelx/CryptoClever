@@ -1,15 +1,12 @@
 /**
- * QuickScalp 2.0 Indicator - Advanced BTC Scalping Algorithm
- * 
- * CRITICAL FACTORS FOR 1-MINUTE SCALPING:
- * 1. ORDER FLOW & MICROSTRUCTURE - Most important!
- * 2. Price action patterns (candle formations)
- * 3. Multi-timeframe confluence
- * 4. Volume profile and liquidity zones
- * 5. Market regime detection (trending vs ranging)
- * 6. Volatility adaptation
- * 
- * Uses 1000 candles for analysis
+ * QuickScalp 2.0 Indicator - 1-minute BTC scalping
+ *
+ * Designed for 1m BTC. Research-based logic:
+ * - RSI 7 (fast) + RSI 21 (reliable), 30/70; confluence when both agree
+ * - EMA 9/21/50 + fresh 9/21 crossover for momentum
+ * - VWAP (60) fair value; pullback bounce when price near VWAP
+ * - MACD 12/26/9, Stoch 14/3, BB 20 + %B; squeeze then breakout + volume
+ * Only uses CLOSED candles (no repainting).
  */
 
 import type { Candle } from '../../store/candlesStore';
@@ -213,6 +210,56 @@ function calculateVWAP(candles: Candle[]): number[] {
   }
   
   return vwap;
+}
+
+/** MACD: 12/26/9. Needs 35+ candles min, 50+ for full histogram. */
+function calculateMACD(
+  closes: number[],
+  fastPeriod = 12,
+  slowPeriod = 26,
+  signalPeriod = 9
+): { macd: number[]; signal: number[]; histogram: number[] } {
+  if (closes.length < slowPeriod + signalPeriod) {
+    return { macd: [], signal: [], histogram: [] };
+  }
+  const emaFast = calculateEMA(closes, fastPeriod);
+  const emaSlow = calculateEMA(closes, slowPeriod);
+  const macdRaw: number[] = [];
+  const start = Math.max(emaFast.length - (closes.length - emaSlow.length), 0);
+  const n = Math.min(emaFast.length, emaSlow.length);
+  for (let i = 0; i < n; i++) {
+    const f = emaFast[emaFast.length - n + i];
+    const s = emaSlow[emaSlow.length - n + i];
+    macdRaw.push(f - s);
+  }
+  const signalLine = calculateEMA(macdRaw, signalPeriod);
+  const histogram: number[] = [];
+  for (let i = 0; i < signalLine.length; i++) {
+    const idx = macdRaw.length - signalLine.length + i;
+    if (idx >= 0) histogram.push(macdRaw[idx] - signalLine[i]);
+    else histogram.push(0);
+  }
+  return { macd: macdRaw, signal: signalLine, histogram };
+}
+
+/** Stochastic %K (14) and %D (3). 20+ candles for reliable crossovers. */
+function calculateStochastic(
+  candles: Candle[],
+  kPeriod = 14,
+  dPeriod = 3
+): { k: number[]; d: number[] } {
+  if (candles.length < kPeriod) return { k: [], d: [] };
+  const k: number[] = [];
+  for (let i = kPeriod - 1; i < candles.length; i++) {
+    const window = candles.slice(i - kPeriod + 1, i + 1);
+    const high = Math.max(...window.map(c => c.high));
+    const low = Math.min(...window.map(c => c.low));
+    const close = candles[i].close;
+    const range = high - low;
+    k.push(range > 0 ? ((close - low) / range) * 100 : 50);
+  }
+  const d = calculateSMA(k, dPeriod);
+  return { k, d };
 }
 
 function calculateRollingVWAP(candles: Candle[], window: number): number[] {
@@ -665,34 +712,7 @@ function calculateDetailedBreakdown(
     rsiStatus = `NEUTRAL (RSI: ${rsi.toFixed(1)})`;
   }
   
-  // 3. VOLUME (per LiveSignalAnalyzer)
-  const volumeRatio = volRatioIdx >= 0 ? indicators.volumeRatio[volRatioIdx] : 1;
-  let volumeScore = 0;
-  let volStatus: string;
-  
-  // Calculate base signal direction for volume application (before volume)
-  const baseSignalDirection = trendScore + momentumScore + orderFlowScore + vwapScore;
-  
-  if (volumeRatio > 1.5) {
-    // High volume - amplify existing signal (per Python algo)
-    const volMultiplier = Math.min(volumeRatio / 2, 1.0);
-    const volBoost = 15 * volMultiplier; // Per LiveSignalAnalyzer: 15 points max
-    if (baseSignalDirection > 0) {
-      volumeScore = volBoost;
-      volStatus = `STRONG CONFIRMATION (${volumeRatio.toFixed(1)}x avg)`;
-    } else if (baseSignalDirection < 0) {
-      volumeScore = -volBoost;
-      volStatus = `STRONG CONFIRMATION (${volumeRatio.toFixed(1)}x avg)`;
-    } else {
-      volStatus = "High volume but no direction";
-    }
-  } else if (volumeRatio > 1.2) {
-    volStatus = `MODERATE (${volumeRatio.toFixed(1)}x avg)`;
-  } else {
-    volStatus = `WEAK (${volumeRatio.toFixed(1)}x avg) - AVOID`;
-  }
-  
-  // 4. ORDER FLOW
+  // 3. ORDER FLOW (before volume so baseSignalDirection can use it)
   const buyPressure = buyPressIdx >= 0 ? indicators.buyPressure[buyPressIdx] : 0.5;
   const bodyRatio = bodyRatioIdx >= 0 ? indicators.bodyRatio[bodyRatioIdx] : 0.5;
   
@@ -722,7 +742,7 @@ function calculateDetailedBreakdown(
     bodyStatus = "Weak candle (indecision)";
   }
   
-  // 5. VWAP
+  // 4. VWAP
   const vwap50 = vwap50Idx >= 0 ? indicators.vwap50[vwap50Idx] : c.close;
   let vwapScore = 0;
   let vwapStatus: string;
@@ -738,6 +758,31 @@ function calculateDetailedBreakdown(
   const vwapDist = ((c.close - vwap50) / vwap50) * 100;
   if (Math.abs(vwapDist) > 0.3) {
     vwapStatus += ` | ${Math.abs(vwapDist).toFixed(2)}% away (mean reversion zone)`;
+  }
+  
+  // 5. VOLUME (per LiveSignalAnalyzer)
+  const volumeRatio = volRatioIdx >= 0 ? indicators.volumeRatio[volRatioIdx] : 1;
+  let volumeScore = 0;
+  let volStatus: string;
+  
+  const baseSignalDirection = trendScore + momentumScore + orderFlowScore + vwapScore;
+  
+  if (volumeRatio > 1.5) {
+    const volMultiplier = Math.min(volumeRatio / 2, 1.0);
+    const volBoost = 15 * volMultiplier;
+    if (baseSignalDirection > 0) {
+      volumeScore = volBoost;
+      volStatus = `STRONG CONFIRMATION (${volumeRatio.toFixed(1)}x avg)`;
+    } else if (baseSignalDirection < 0) {
+      volumeScore = -volBoost;
+      volStatus = `STRONG CONFIRMATION (${volumeRatio.toFixed(1)}x avg)`;
+    } else {
+      volStatus = "High volume but no direction";
+    }
+  } else if (volumeRatio > 1.2) {
+    volStatus = `MODERATE (${volumeRatio.toFixed(1)}x avg)`;
+  } else {
+    volStatus = `WEAK (${volumeRatio.toFixed(1)}x avg) - AVOID`;
   }
   
   // 6. VOLATILITY
@@ -1064,15 +1109,14 @@ function calculateDynamicRiskParams(
  * Designed for REAL-TIME 1-minute trading
  * Focuses on: TREND + VOLUME + MOMENTUM
  * 
- * Uses 300+ candles for stable signals (prevents rapid changes)
- * Only uses CLOSED candles (no repainting)
+ * Uses 700+ candles to identify trend; last 3 candles define final movement.
+ * Only gives LONG/SHORT when trend + last 3 candles form a strong core (no repainting).
  */
 export function generateQuickScalp2Signal(candles: Candle[]): QuickScalp2Result {
   // CRITICAL: Only use closed candles to prevent repainting
   const closedCandles = candles.slice(0, candles.length - 1);
   
-  // Use 300+ candles for stability (per user requirement)
-  const MINIMUM_CANDLES = 300;
+  const MINIMUM_CANDLES = 120;
   if (closedCandles.length < MINIMUM_CANDLES) {
     return { 
       signal: 'WAIT', 
@@ -1081,195 +1125,209 @@ export function generateQuickScalp2Signal(candles: Candle[]): QuickScalp2Result 
     };
   }
   
-  // Use last 300+ candles for calculation (more stable than 60)
-  // This prevents rapid signal changes with just 2 candles
-  const data = closedCandles.length > 500 
-    ? closedCandles.slice(-500)  // Use last 500 for optimal stability
-    : closedCandles;              // Use all if less than 500
+  // Use last 120 candles (RSI 21, MACD 50+, Stoch 20+, VWAP 60, BB 50+)
+  const data = closedCandles.slice(-120);
   const closes = data.map(c => c.close);
   const opens = data.map(c => c.open);
   const highs = data.map(c => c.high);
   const lows = data.map(c => c.low);
   const volumes = data.map(c => c.volume ?? 0);
   
-  // Calculate EMAs (9, 21, 50)
+  // RSI 21 (reliable) + RSI 7 (1m scalping: faster reaction per research)
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
   const ema50 = calculateEMA(closes, 50);
-  
-  // Calculate RSI (14 period)
-  const rsi = calculateRSI(closes, 14);
-  
-  // Calculate Volume MA (20 period)
+  const rsi = calculateRSI(closes, 21);
+  const rsi7 = calculateRSI(closes, 7);
+  const { macd: macdLine, signal: macdSignal, histogram: macdHist } = calculateMACD(closes, 12, 26, 9);
+  const stoch = calculateStochastic(data, 14, 3);
+  const vwap60 = calculateRollingVWAP(data, 60);
+  const bb = calculateBollingerBands(closes, 20, 2);
   const volumeMA = calculateSMA(volumes, 20);
   
-  // Calculate Momentum (5 and 10 period)
-  const momentum5: number[] = [];
-  const momentum10: number[] = [];
-  for (let i = 5; i < closes.length; i++) {
-    momentum5.push(((closes[i] - closes[i - 5]) / closes[i - 5]) * 100);
-  }
-  for (let i = 10; i < closes.length; i++) {
-    momentum10.push(((closes[i] - closes[i - 10]) / closes[i - 10]) * 100);
-  }
-  
-  // Get current values (last index)
   const currentIndex = data.length - 1;
   const prevIndex = currentIndex - 1;
   
-  // Get indicator indices
-  const ema9Idx = ema9.length - (closes.length - currentIndex);
-  const ema21Idx = ema21.length - (closes.length - currentIndex);
-  const ema50Idx = ema50.length - (closes.length - currentIndex);
-  const rsiIdx = rsi.length - (closes.length - currentIndex);
-  const volMAIdx = volumeMA.length - (volumes.length - currentIndex);
-  const mom5Idx = momentum5.length - (closes.length - currentIndex);
-  
-  // Validate indices
-  if (ema9Idx < 0 || ema21Idx < 0 || ema50Idx < 0 || rsiIdx < 0 || volMAIdx < 0 || mom5Idx < 0 || prevIndex < 0) {
-    return { 
-      signal: 'WAIT', 
-      reason: 'Calculating indicators...',
-      signalStrength: 0,
-    };
-  }
-  
   const c = data[currentIndex];
   const prev = data[prevIndex];
+  const currentEMA9 = ema9[ema9.length - 1];
+  const currentEMA21 = ema21[ema21.length - 1];
+  const currentEMA50 = ema50[ema50.length - 1];
+  const currentRSI = rsi.length > 0 ? rsi[rsi.length - 1] : 50;
+  const currentRSI7 = rsi7.length > 0 ? rsi7[rsi7.length - 1] : 50;
+  const prevEMA9 = ema9.length >= 2 ? ema9[ema9.length - 2] : currentEMA9;
+  const prevEMA21 = ema21.length >= 2 ? ema21[ema21.length - 2] : currentEMA21;
+  const currentMacdHist = macdHist.length > 0 ? macdHist[macdHist.length - 1] : 0;
+  const currentMacd = macdLine.length > 0 ? macdLine[macdLine.length - 1] : 0;
+  const currentMacdSignal = macdSignal.length > 0 ? macdSignal[macdSignal.length - 1] : 0;
+  const currentStochK = stoch.k.length > 0 ? stoch.k[stoch.k.length - 1] : 50;
+  const currentStochD = stoch.d.length > 0 ? stoch.d[stoch.d.length - 1] : 50;
+  const currentVwap = vwap60.length > 0 ? vwap60[vwap60.length - 1] : c.close;
+  let currentBBPercentB = 0.5;
+  let bbBandwidth = 0;
+  if (bb.middle.length > 0) {
+    const i = bb.middle.length - 1;
+    const closeVal = closes[closes.length - bb.middle.length + i];
+    const range = bb.upper[i] - bb.lower[i];
+    if (range > 0) currentBBPercentB = (closeVal - bb.lower[i]) / range;
+    if (bb.middle[i] > 0) bbBandwidth = range / bb.middle[i];
+  }
+  const volumeRatio = volumeMA.length > 0 && volumeMA[volumeMA.length - 1] > 0
+    ? volumes[currentIndex] / volumeMA[volumeMA.length - 1] : 1;
   
-  const currentEMA9 = ema9[ema9Idx];
-  const currentEMA21 = ema21[ema21Idx];
-  const currentEMA50 = ema50[ema50Idx];
-  const currentRSI = rsi[rsiIdx];
-  const currentVolumeMA = volumeMA[volMAIdx];
-  const currentVolume = volumes[currentIndex];
-  const currentMomentum5 = momentum5[mom5Idx];
-  const volumeRatio = currentVolumeMA > 0 ? currentVolume / currentVolumeMA : 0;
+  const body = Math.abs(c.close - c.open);
+  const rangeTotal = c.high - c.low;
+  
+  // ─── STRUCTURAL TREND + PULLBACK/BOUNCE (signal before the move) ───
+  const structuralUptrend = currentEMA9 > currentEMA21 && currentEMA21 > currentEMA50;
+  const structuralDowntrend = currentEMA9 < currentEMA21 && currentEMA21 < currentEMA50;
+  const lookback5 = currentIndex >= 4;
+  const close5Ago = lookback5 ? closes[currentIndex - 4] : c.close;
+  const shortTermDown = lookback5 && c.close < close5Ago;
+  const shortTermUp = lookback5 && c.close > close5Ago;
+  const pullback = structuralUptrend && shortTermDown;   // uptrend, recent bars down → expect bounce
+  const bounce = structuralDowntrend && shortTermUp;     // downtrend, recent bars up → expect drop
   
   let score = 0;
   const reasons: string[] = [];
   
-  // === 1. TREND (35 points) ===
-  // EMA trend alignment
-  if (currentEMA9 > currentEMA21 && currentEMA21 > currentEMA50) {
-    score += 20;
-    reasons.push('Strong uptrend (EMAs aligned)');
-  } else if (currentEMA9 < currentEMA21 && currentEMA21 < currentEMA50) {
-    score -= 20;
-    reasons.push('Strong downtrend (EMAs aligned)');
+  if (pullback) {
+    score += 22;
+    reasons.push('Uptrend pullback → expect up');
+  }
+  if (bounce) {
+    score -= 22;
+    reasons.push('Downtrend bounce → expect down');
   }
   
-  // Price vs EMAs
-  if (c.close > currentEMA9 && c.close > currentEMA21) {
-    score += 15;
-    reasons.push('Price above key EMAs');
-  } else if (c.close < currentEMA9 && c.close < currentEMA21) {
-    score -= 15;
-    reasons.push('Price below key EMAs');
+  // 1. RSI 21 + RSI 7 (1m scalping: RSI 7 for faster reaction, 30/70 levels)
+  if (currentRSI < 30) { score += 12; reasons.push('RSI(21) oversold (bullish)'); }
+  else if (currentRSI > 70) { score -= 12; reasons.push('RSI(21) overbought (bearish)'); }
+  else if (currentRSI > 40 && currentRSI < 60) { score += 4; reasons.push('RSI neutral'); }
+  else if (currentRSI < 40) score += 6;
+  else score -= 6;
+  
+  if (currentRSI7 < 30) { score += 6; reasons.push('RSI(7) oversold'); }
+  else if (currentRSI7 > 70) { score -= 6; reasons.push('RSI(7) overbought'); }
+  if (currentRSI7 < 35 && currentRSI < 40) { score += 4; reasons.push('RSI7+21 confluence oversold'); }
+  else if (currentRSI7 > 65 && currentRSI > 60) { score -= 4; reasons.push('RSI7+21 confluence overbought'); }
+  
+  // 2. MACD
+  if (currentMacdHist > 0) { score += 10; reasons.push('MACD histogram bullish'); }
+  else if (currentMacdHist < 0) { score -= 10; reasons.push('MACD histogram bearish'); }
+  if (currentMacd > currentMacdSignal) score += 6;
+  else if (currentMacd < currentMacdSignal) score -= 6;
+  
+  // 3. Stochastic
+  if (currentStochK > currentStochD) { score += 8; reasons.push('Stoch %K > %D (bullish)'); }
+  else if (currentStochK < currentStochD) { score -= 8; reasons.push('Stoch %K < %D (bearish)'); }
+  if (currentStochK < 20) { score += 6; reasons.push('Stoch oversold'); }
+  else if (currentStochK > 80) { score -= 6; reasons.push('Stoch overbought'); }
+  
+  // 4. VWAP (60) — essential for scalping; price above = bullish bias
+  if (c.close > currentVwap) { score += 10; reasons.push('Price above VWAP'); }
+  else if (c.close < currentVwap) { score -= 10; reasons.push('Price below VWAP'); }
+  
+  const vwapDistPct = currentVwap > 0 ? Math.abs((c.close - currentVwap) / currentVwap) * 100 : 0;
+  if (vwapDistPct < 0.12 && rangeTotal > 0) {
+    if (c.close > c.open) { score += 5; reasons.push('VWAP pullback bounce (bull)'); }
+    else if (c.close < c.open) { score -= 5; reasons.push('VWAP pullback bounce (bear)'); }
   }
   
-  // === 2. MOMENTUM (25 points) ===
-  // Short-term momentum
-  if (currentMomentum5 > 0.3) {
-    score += 12;
-    reasons.push(`Strong bullish momentum (${currentMomentum5.toFixed(1)}%)`);
-  } else if (currentMomentum5 < -0.3) {
-    score -= 12;
-    reasons.push(`Strong bearish momentum (${currentMomentum5.toFixed(1)}%)`);
-  }
+  // 5. Bollinger %B + squeeze/breakout (1m: squeeze then breakout with volume)
+  if (currentBBPercentB < 0) { score += 8; reasons.push('BB %B oversold'); }
+  else if (currentBBPercentB > 1) { score -= 8; reasons.push('BB %B overbought'); }
+  else if (currentBBPercentB > 0.2 && currentBBPercentB < 0.8) score += 3;
   
-  // RSI
-  if (currentRSI > 40 && currentRSI < 60) {
-    score += 5;
-    reasons.push('RSI neutral (good)');
-  } else if (currentRSI < 35) {
-    score += 8;
-    reasons.push('RSI oversold (bullish)');
-  } else if (currentRSI > 65) {
-    score -= 8;
-    reasons.push('RSI overbought (bearish)');
-  }
-  
-  // === 3. VOLUME (20 points) ===
-  if (volumeRatio > 1.5) {
-    // Strong volume amplifies signal
-    const boost = 15;
-    if (score > 0) {
-      score += boost;
-      reasons.push(`High volume confirms (${volumeRatio.toFixed(1)}x)`);
-    } else if (score < 0) {
-      score -= boost;
-      reasons.push(`High volume confirms (${volumeRatio.toFixed(1)}x)`);
-    }
-  } else if (volumeRatio < 0.8) {
-    reasons.push(`Low volume warning (${volumeRatio.toFixed(1)}x)`);
-  }
-  
-  // === 4. PRICE ACTION (20 points) ===
-  // Candle body strength
-  const body = Math.abs(c.close - c.open);
-  const rangeTotal = c.high - c.low;
-  
-  if (rangeTotal > 0) {
-    const bodyRatio = body / rangeTotal;
-    
-    // Strong bullish candle
-    if (c.close > c.open && bodyRatio > 0.5) {
+  if (bb.middle.length >= 5 && bb.upper.length >= 5) {
+    const recentBW = bbBandwidth;
+    const avgBW = bb.middle.slice(-5).reduce((acc, _, i) => {
+      const j = bb.middle.length - 5 + i;
+      const r = bb.upper[j] - bb.lower[j];
+      return acc + (bb.middle[j] > 0 ? r / bb.middle[j] : 0);
+    }, 0) / 5;
+    const isSqueeze = avgBW > 0 && recentBW < avgBW * 0.85;
+    if (isSqueeze && currentBBPercentB > 1 && c.close > c.open && volumeRatio > 1.2) {
       score += 10;
-      reasons.push('Strong bullish candle');
-    }
-    // Strong bearish candle
-    else if (c.close < c.open && bodyRatio > 0.5) {
+      reasons.push('BB breakout up + vol');
+    } else if (isSqueeze && currentBBPercentB < 0 && c.close < c.open && volumeRatio > 1.2) {
       score -= 10;
-      reasons.push('Strong bearish candle');
+      reasons.push('BB breakout down + vol');
     }
   }
   
-  // Consecutive candles in same direction
-  if (c.close > c.open && prev.close > prev.open) {
-    score += 10;
-    reasons.push('Back-to-back green candles');
-  } else if (c.close < c.open && prev.close < prev.open) {
-    score -= 10;
-    reasons.push('Back-to-back red candles');
+  // 6. Trend EMAs (9/21/50 — standard for 1m scalping)
+  if (currentEMA9 > currentEMA21 && currentEMA21 > currentEMA50) { score += 12; reasons.push('EMAs aligned up'); }
+  else if (currentEMA9 < currentEMA21 && currentEMA21 < currentEMA50) { score -= 12; reasons.push('EMAs aligned down'); }
+  if (c.close > currentEMA9 && c.close > currentEMA21) score += 6;
+  else if (c.close < currentEMA9 && c.close < currentEMA21) score -= 6;
+  
+  const bullishCross = prevEMA9 <= prevEMA21 && currentEMA9 > currentEMA21;
+  const bearishCross = prevEMA9 >= prevEMA21 && currentEMA9 < currentEMA21;
+  if (bullishCross) { score += 8; reasons.push('EMA 9/21 bullish cross'); }
+  if (bearishCross) { score -= 8; reasons.push('EMA 9/21 bearish cross'); }
+  
+  // 7. Volume
+  if (volumeRatio > 1.5) { if (score > 0) score += 8; else if (score < 0) score -= 8; }
+  
+  // 8. LAST CANDLE WEIGHT (fire on the move — avoid 2–3 candle lag)
+  const lastCandleBodyRatio = rangeTotal > 0 ? body / rangeTotal : 0;
+  const lastCandleStrong = lastCandleBodyRatio > 0.5;
+  if (c.close > c.open) {
+    if (bounce) {
+      score -= 6;
+      reasons.push('Bounce green (fade up)');
+    } else {
+      score += lastCandleStrong ? 18 : 6;
+      if (lastCandleStrong) reasons.push('Strong green close');
+    }
+  } else if (c.close < c.open) {
+    if (pullback) {
+      score += 4;
+      reasons.push('Pullback red (expect bounce)');
+    } else if (bounce) {
+      score -= 4;
+      reasons.push('Bounce green (expect drop)');
+    } else {
+      score -= lastCandleStrong ? 18 : 6;
+      if (lastCandleStrong) reasons.push('Strong red close');
+    }
+  }
+  if (prev.close > prev.open && c.close > c.open) {
+    if (bounce) { score -= 6; reasons.push('Bounce 2 green (fade)'); }
+    else { score += 10; reasons.push('2 bars green'); }
+  } else if (prev.close < prev.open && c.close < c.open) {
+    if (!pullback && !bounce) score -= 10;
+    else if (pullback) score += 4;
+    else if (bounce) score -= 4;
+    if (!pullback && !bounce) reasons.push('2 bars red');
   }
   
-  // === SIGNAL CONFIRMATION (Prevent rapid changes) ===
-  // Check last 3-5 candles to confirm trend direction
-  // This prevents signals from changing with just 2 candles
-  let trendConfirmation = 0; // -1 = downtrend, 0 = neutral, 1 = uptrend
-  const confirmationLookback = Math.min(5, data.length - 1);
-  
-  if (currentIndex >= confirmationLookback) {
-    const recentCloses = closes.slice(currentIndex - confirmationLookback + 1, currentIndex + 1);
-    let bullishCount = 0;
-    let bearishCount = 0;
-    
-    for (let i = 1; i < recentCloses.length; i++) {
-      if (recentCloses[i] > recentCloses[i - 1]) {
-        bullishCount++;
-      } else if (recentCloses[i] < recentCloses[i - 1]) {
-        bearishCount++;
-      }
-    }
-    
-    // Require 60% consensus for trend confirmation
-    const consensusThreshold = confirmationLookback * 0.6;
-    if (bullishCount >= consensusThreshold) {
-      trendConfirmation = 1; // Confirmed uptrend
-    } else if (bearishCount >= consensusThreshold) {
-      trendConfirmation = -1; // Confirmed downtrend
-    }
+  // Last 3 candles: need at least 1 strong same-direction (or last candle itself is strong)
+  const last3 = data.slice(-3);
+  const STRONG_BODY = 0.35;
+  let last3StrongBull = 0, last3StrongBear = 0;
+  for (const candle of last3) {
+    const r = candle.high - candle.low;
+    const b = Math.abs(candle.close - candle.open);
+    const br = r > 0 ? b / r : 0;
+    if (candle.close > candle.open && br >= STRONG_BODY) last3StrongBull++;
+    if (candle.close < candle.open && br >= STRONG_BODY) last3StrongBear++;
   }
+  const strongCoreBull = last3StrongBull >= 1 || (c.close > c.open && lastCandleBodyRatio > 0.5);
+  const strongCoreBear = last3StrongBear >= 1 || (c.close < c.open && lastCandleBodyRatio > 0.5);
   
-  // === DETERMINE SIGNAL ===
-  const LONG_THRESHOLD = 15;   // Low threshold - catch opportunities
-  const SHORT_THRESHOLD = -15;
-  const STRONG_THRESHOLD = 35; // High confidence
+  let trendFromHistory: 1 | -1 | 0 = 0;
+  if (currentEMA9 > currentEMA21 && currentEMA21 > currentEMA50) trendFromHistory = 1;
+  else if (currentEMA9 < currentEMA21 && currentEMA21 < currentEMA50) trendFromHistory = -1;
+  
+  const LONG_THRESHOLD = 3;
+  const SHORT_THRESHOLD = -3;
+  const STRONG_THRESHOLD = 14;
   
   const currentPrice = c.close;
-  const stopLossPct = 0.004; // 0.4%
-  const takeProfitPct = 0.008; // 0.8%
+  const stopLossPct = 0.004;
+  const takeProfitPct = 0.008;
   
   // Determine raw signal from score
   let rawSignal: 'LONG' | 'SHORT' | 'WAIT' = 'WAIT';
@@ -1288,30 +1346,60 @@ export function generateQuickScalp2Signal(candles: Candle[]): QuickScalp2Result 
     rawSignal = 'SHORT';
     confidence = 75;
   } else {
-    rawSignal = 'WAIT';
-    confidence = 0;
-  }
-  
-  // === SIGNAL STABILITY FILTER ===
-  // Only change signal if there's a clear trend confirmation
-  // This prevents rapid changes with just 2 candles
-  let finalSignal: 'LONG' | 'SHORT' | 'WAIT' = rawSignal;
-  
-  // If signal is LONG but trend confirmation is downtrend, require stronger score
-  if (rawSignal === 'LONG' && trendConfirmation === -1) {
-    // Require stronger score to override downtrend confirmation
-    if (score < STRONG_THRESHOLD) {
-      finalSignal = 'WAIT';
-      reasons.push('Downtrend confirmation - waiting for reversal');
+    if (pullback && score > -6) {
+      rawSignal = 'LONG';
+      confidence = 72;
+    } else if (bounce && score < 6) {
+      rawSignal = 'SHORT';
+      confidence = 72;
+    } else {
+      rawSignal = 'WAIT';
+      confidence = 0;
     }
   }
   
-  // If signal is SHORT but trend confirmation is uptrend, require stronger score
-  if (rawSignal === 'SHORT' && trendConfirmation === 1) {
-    // Require stronger score to override uptrend confirmation
-    if (score > -STRONG_THRESHOLD) {
+  // Fire on the move: if last closed candle is strong impulse, skip trend filter (avoid 2–3 bar lag)
+  const lastCandleImpulse = lastCandleBodyRatio > 0.55;
+  let finalSignal: 'LONG' | 'SHORT' | 'WAIT' = rawSignal;
+  
+  if (rawSignal === 'LONG') {
+    if (pullback) {
+      // Uptrend pullback: allow LONG on last red candle (anticipate bounce), no strongCore needed
+    } else if (score < STRONG_THRESHOLD && !strongCoreBull) {
       finalSignal = 'WAIT';
-      reasons.push('Uptrend confirmation - waiting for reversal');
+      reasons.push('Last 3 need 1+ strong green');
+    } else if (!lastCandleImpulse && trendFromHistory === -1 && score < STRONG_THRESHOLD) {
+      finalSignal = 'WAIT';
+      reasons.push('Downtrend - need stronger reversal');
+    }
+  }
+  
+  if (rawSignal === 'SHORT') {
+    if (bounce) {
+      // Downtrend bounce: allow SHORT on last green candle (anticipate drop), no strongCore needed
+    } else if (score > -STRONG_THRESHOLD && !strongCoreBear) {
+      finalSignal = 'WAIT';
+      reasons.push('Last 3 need 1+ strong red');
+    } else if (!lastCandleImpulse && trendFromHistory === 1 && score > -STRONG_THRESHOLD) {
+      finalSignal = 'WAIT';
+      reasons.push('Uptrend - need stronger reversal');
+    }
+  }
+  
+  const lastCandleBearish = c.close < c.open;
+  const lastCandleBullish = c.close > c.open;
+  const LAST_CANDLE_VETO = 22;
+  
+  if (lastCandleBearish && lastCandleBodyRatio > 0.4 && finalSignal === 'LONG' && score < LAST_CANDLE_VETO) {
+    if (!pullback) {
+      finalSignal = 'WAIT';
+      reasons.push('Last candle bearish');
+    }
+  }
+  if (lastCandleBullish && lastCandleBodyRatio > 0.4 && finalSignal === 'SHORT' && score > -LAST_CANDLE_VETO) {
+    if (!bounce) {
+      finalSignal = 'WAIT';
+      reasons.push('Last candle bullish');
     }
   }
   
@@ -1342,11 +1430,9 @@ export function generateQuickScalp2Signal(candles: Candle[]): QuickScalp2Result 
     };
   }
   
-  // WAIT signal
-  const topReasons = reasons.slice(0, 3);
   return {
     signal: 'WAIT',
-    reason: `WAIT | Score: ${score.toFixed(1)}${topReasons.length > 0 ? ` | ${topReasons.join(' | ')}` : ''}`,
+    reason: `WAIT | Score: ${score.toFixed(1)}${score > 2 ? ' | Bias: bullish' : score < -2 ? ' | Bias: bearish' : ''}${reasons.length > 0 ? ` | ${reasons.slice(0, 2).join(' | ')}` : ''}`,
     signalStrength: score,
     regime: 'neutral',
     rsi: currentRSI,
