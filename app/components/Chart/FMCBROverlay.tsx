@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { IPriceLine, ISeriesApi } from 'lightweight-charts';
+import type { LineWidth } from 'lightweight-charts';
 import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
 
 interface FMCBROverlayProps {
@@ -69,7 +70,7 @@ export default function FMCBROverlay({
     // Render all levels as clean horizontal lines
     levels.forEach(level => {
       let color = '#888888';
-      let lineWidth = 1;
+      let lineWidth: LineWidth = 1;
       let lineStyle: 0 | 1 | 2 = 2; // Dashed by default
       let title = level.label;
 
@@ -86,7 +87,7 @@ export default function FMCBROverlay({
         title = `Setup (CB1: ${cb1 ? '✓' : '✗'})`;
       } else if (level.type === 'entry') {
         color = scheme.entry;
-        lineWidth = 1.5;
+        lineWidth = 2;
         lineStyle = 1; // Solid
         title = level.label;
       } else if (level.type === 'tp') {
