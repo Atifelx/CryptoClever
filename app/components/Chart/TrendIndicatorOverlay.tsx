@@ -117,9 +117,9 @@ export default function TrendIndicatorOverlay({
                 className="absolute inset-0 rounded-full animate-ping"
                 style={{
                   backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                  width: '24px',
-                  height: '24px',
-                  margin: '-4px',
+                  width: '19px',
+                  height: '19px',
+                  margin: '-3px',
                 }}
               />
               {/* Middle glow ring */}
@@ -127,8 +127,8 @@ export default function TrendIndicatorOverlay({
                 className="absolute inset-0 rounded-full"
                 style={{
                   backgroundColor: 'rgba(255, 255, 255, 0.5)',
-                  width: '20px',
-                  height: '20px',
+                  width: '16px',
+                  height: '16px',
                   margin: '-2px',
                   boxShadow: '0 0 10px rgba(255, 255, 255, 0.8), 0 0 20px rgba(255, 255, 255, 0.4)',
                 }}
@@ -137,8 +137,8 @@ export default function TrendIndicatorOverlay({
               <div 
                 className="relative rounded-full bg-white"
                 style={{
-                  width: '16px',
-                  height: '16px',
+                  width: '13px',
+                  height: '13px',
                   boxShadow: '0 0 8px rgba(255, 255, 255, 1), 0 0 16px rgba(255, 255, 255, 0.6)',
                 }}
               />

@@ -258,7 +258,7 @@ export default function LiveAnalysisToggle() {
   // Clear locked zones when symbol or timeframe changes
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
       {/* Core Engine Button */}
       <button
         onClick={() => {
@@ -266,7 +266,7 @@ export default function LiveAnalysisToggle() {
             handleToggle();
           }
         }}
-        className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+        className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-semibold transition-colors text-sm sm:text-base ${
           analysis
             ? 'bg-[#26a69a] hover:bg-[#208a7e] text-white'
             : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
@@ -277,9 +277,9 @@ export default function LiveAnalysisToggle() {
       </button>
 
       {/* Live Analysis Toggle */}
-      <div className="flex items-center gap-2">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <span className="text-sm text-gray-400">Keep Live Analysis</span>
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        <label className="flex items-center gap-1.5 sm:gap-2 cursor-pointer">
+          <span className="text-xs sm:text-sm text-gray-400 whitespace-nowrap">Keep Live</span>
           <div className="relative">
             <input
               type="checkbox"
@@ -307,8 +307,8 @@ export default function LiveAnalysisToggle() {
 
       {/* Analysis Display (when available) */}
       {analysis && (
-        <div className="flex items-center gap-3 text-sm flex-wrap">
-          <div className="px-3 py-1 bg-[#1a1a1a] rounded border border-gray-800">
+        <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm flex-wrap">
+          <div className="px-2 py-1 sm:px-3 sm:py-1 bg-[#1a1a1a] rounded border border-gray-800">
             <span className="text-gray-400">Structure: </span>
             <span
               className={`font-semibold ${
@@ -322,11 +322,11 @@ export default function LiveAnalysisToggle() {
               {analysis.structure}
             </span>
           </div>
-          <div className="px-3 py-1 bg-[#1a1a1a] rounded border border-gray-800">
+          <div className="px-2 py-1 sm:px-3 sm:py-1 bg-[#1a1a1a] rounded border border-gray-800">
             <span className="text-gray-400">Regime: </span>
             <span className="font-semibold text-white">{analysis.regime}</span>
           </div>
-          <div className="px-3 py-1 bg-[#1a1a1a] rounded border border-gray-800">
+          <div className="px-2 py-1 sm:px-3 sm:py-1 bg-[#1a1a1a] rounded border border-gray-800">
             <span className="text-gray-400">Confidence: </span>
             <span className="font-semibold text-white">
               {analysis.confidence.toFixed(0)}%

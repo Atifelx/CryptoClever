@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import { StoreHydration } from "./components/StoreHydration";
@@ -7,6 +7,12 @@ import CacheBuster from "./components/CacheBuster";
 export const metadata: Metadata = {
   title: "CryptoClever - Trading Platform",
   description: "Professional trading platform with real-time charts - Build by Atif Shaikh",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({

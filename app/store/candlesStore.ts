@@ -41,9 +41,9 @@ export const useCandlesStore = create<CandlesState>((set, get) => ({
       } else {
         next.push(candle);
         next.sort((a, b) => a.time - b.time);
-        // Keep max 1000 candles
-        if (next.length > 1000) {
-          next.splice(0, next.length - 1000);
+        // Keep max 1001 candles so TrendScalp has 1000 closed + 1 forming
+        if (next.length > 1001) {
+          next.splice(0, next.length - 1001);
         }
       }
       

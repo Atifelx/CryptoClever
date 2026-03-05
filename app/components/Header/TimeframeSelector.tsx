@@ -1,7 +1,6 @@
 'use client';
 
 import IndicatorSelector from '../Indicators/IndicatorSelector';
-import LiveAnalysisToggle from './LiveAnalysisToggle';
 
 interface TimeframeSelectorProps {
   enabledIndicators: Set<string>;
@@ -9,7 +8,7 @@ interface TimeframeSelectorProps {
 }
 
 /**
- * Renders indicator selector and live analysis toggle.
+ * Renders indicator selector. Core Engine moved to Navbar (top bar).
  * Timeframe is fixed to 1m (no UI selector).
  */
 export default function TimeframeSelector({
@@ -22,7 +21,6 @@ export default function TimeframeSelector({
         enabledIndicators={enabledIndicators}
         onToggleIndicator={onToggleIndicator}
       />
-      <LiveAnalysisToggle />
     </div>
   );
 }

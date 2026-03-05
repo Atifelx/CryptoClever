@@ -119,10 +119,10 @@ export default function SymbolList() {
               e.currentTarget.src = getFallbackAvatarUrl(symbol, base);
             }}
           />
-          <div className="flex flex-col min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
+          <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
+            <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-sm font-medium text-white truncate">{base}</span>
-              <span className="text-xs text-gray-500">/USDT</span>
+              <span className="text-xs text-gray-500 flex-shrink-0">/USDT</span>
             </div>
             <span className="text-xs text-gray-400 truncate">{name}</span>
           </div>

@@ -5,10 +5,8 @@ import TradingChart from './components/Chart/TradingChart';
 import TradingSignalsPanel from './components/Chart/TradingSignalsPanel';
 import IndicatorDashboard from './components/Chart/IndicatorDashboard';
 import SymbolList from './components/Sidebar/SymbolList';
-import SearchBar from './components/Sidebar/SearchBar';
 import TimeframeSelector from './components/Header/TimeframeSelector';
 import Navbar from './components/Header/Navbar';
-import AccountInfo from './components/Footer/AccountInfo';
 import { useTradingStore } from './store/tradingStore';
 import { useBackendSettingsSync } from './hooks/useBackendSettingsSync';
 import { useBackendCandlesLoader } from './hooks/useBackendCandlesLoader';
@@ -109,17 +107,37 @@ export default function Home() {
   const safeSymbol = isMounted ? selectedSymbol : 'BTCUSDT';
   const safeTimeframe = isMounted ? selectedTimeframe : '1m';
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   return (
-    <div className="flex h-screen bg-[#0a0a0a]">
-      {/* Sidebar */}
-      <div className="w-64 bg-[#1a1a1a] border-r border-gray-800 flex flex-col">
-        <div className="p-4 border-b border-gray-800">
-          <h1 className="text-2xl font-bold text-white">CryptoClever</h1>
+    <div className="flex h-screen bg-[#0a0a0a] overflow-hidden">
+      {/* Mobile overlay when sidebar is open */}
+      {sidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close sidebar"
+          className="fixed inset-0 bg-black/60 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar: wide enough for full symbol name; hideable on mobile, scrollable */}
+      <aside
+        className={`
+          fixed md:static inset-y-0 left-0 z-40
+          w-[11rem] bg-[#1a1a1a] border-r border-gray-800 flex flex-col min-h-0
+          transform transition-transform duration-200 ease-out
+          md:translate-x-0
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
+      >
+        <div className="p-3 border-b border-gray-800 flex-shrink-0">
+          <h1 className="text-[1.35rem] font-bold text-white truncate">CryptoClever</h1>
           <p className="text-xs text-gray-500">
             Build by{' '}
-            <a 
-              href="https://www.linkedin.com/in/atif-shaikh" 
-              target="_blank" 
+            <a
+              href="https://www.linkedin.com/in/atif-shaikh"
+              target="_blank"
               rel="noopener noreferrer"
               className="text-[#26a69a] hover:text-[#208a7e] hover:underline transition-colors"
             >
@@ -127,16 +145,17 @@ export default function Home() {
             </a>
           </p>
         </div>
-        <SearchBar />
-        <SymbolList />
-      </div>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <SymbolList />
+        </div>
+      </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        {/* Header + compact controls (Indicators, Semafor, Core Engine in one row) */}
-        <Navbar />
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top bar: symbol + Core Engine (parallel); menu button on mobile */}
+        <Navbar onMenuClick={() => setSidebarOpen((o) => !o)} sidebarOpen={sidebarOpen} />
         <div className="bg-[#1a1a1a] border-b border-gray-800 py-2 px-4 flex flex-wrap items-center justify-between gap-2">
-          <TimeframeSelector 
+          <TimeframeSelector
             enabledIndicators={enabledIndicators}
             onToggleIndicator={handleToggleIndicator}
           />
@@ -151,7 +170,7 @@ export default function Home() {
         <TradingSignalsPanel />
 
         {/* Chart */}
-        <div key={`chart-${safeSymbol}-${safeTimeframe}`} className="flex-1 p-4 min-h-0">
+        <div key={`chart-${safeSymbol}-${safeTimeframe}`} className="flex-1 p-2 md:p-4 min-h-0">
           <TradingChart
             key={`tradingview-${safeSymbol}-${safeTimeframe}`}
             symbol={safeSymbol}
@@ -161,9 +180,6 @@ export default function Home() {
             onIndicatorDataUpdate={setIndicatorData}
           />
         </div>
-
-        {/* Footer */}
-        <AccountInfo />
       </div>
     </div>
   );
