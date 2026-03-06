@@ -49,51 +49,50 @@ export default function FMCBROverlay({
 
     const { levels, direction, breakType, cb1 } = signal;
 
-    // Color scheme
+    // Dotted lines: green = bullish (price could go up), red = bearish (price could go down)
     const colors = {
       bullish: {
-        entry: '#00ff66',      // Green for entries
-        tp: '#ffaa00',         // Orange for TP
-        base: '#ff2222',       // Red for base
-        setup: '#00aaff',      // Blue for setup
+        entry: '#00cc66',      // Green dotted — entry zone
+        tp: '#00ff88',        // Lighter green dotted — TP targets
+        base: '#ff4444',      // Red solid — base (stop)
+        setup: '#00aaff',     // Blue solid — setup
       },
       bearish: {
-        entry: '#ff2222',     // Red for entries
-        tp: '#ffaa00',         // Orange for TP
-        base: '#00ff66',       // Green for base
-        setup: '#00aaff',      // Blue for setup
+        entry: '#ff4444',     // Red dotted — entry zone
+        tp: '#ff6666',        // Lighter red dotted — TP targets
+        base: '#00cc66',      // Green solid — base (stop)
+        setup: '#00aaff',     // Blue solid — setup
       },
     };
 
     const scheme = direction === 'BULLISH' ? colors.bullish : colors.bearish;
 
-    // Render all levels as clean horizontal lines
+    // Render all levels: Base/Setup = solid; Entry/TP = dotted (green bullish / red bearish)
     levels.forEach(level => {
       let color = '#888888';
       let lineWidth: LineWidth = 1;
-      let lineStyle: 0 | 1 | 2 = 2; // Dashed by default
+      let lineStyle: 0 | 1 | 2 = 1; // 0=Solid, 1=Dotted, 2=Dashed
       let title = level.label;
 
-      // Style based on level type
       if (level.type === 'base') {
         color = scheme.base;
         lineWidth = 2;
-        lineStyle = 0; // Solid
+        lineStyle = 0;
         title = `Base (${breakType})`;
       } else if (level.type === 'setup') {
         color = scheme.setup;
         lineWidth = 2;
-        lineStyle = 0; // Solid
+        lineStyle = 0;
         title = `Setup (CB1: ${cb1 ? '✓' : '✗'})`;
       } else if (level.type === 'entry') {
         color = scheme.entry;
         lineWidth = 2;
-        lineStyle = 1; // Solid
+        lineStyle = 1; // Dotted — where price could go
         title = level.label;
       } else if (level.type === 'tp') {
         color = scheme.tp;
-        lineWidth = 1;
-        lineStyle = 2; // Dashed
+        lineWidth = 2;
+        lineStyle = 1; // Dotted — target levels
         title = level.label;
       }
 

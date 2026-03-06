@@ -2,10 +2,53 @@
  * FMCBR 3.0 - Official Algorithm
  * Fibo Musang Candle Break Retest
  * 
- * Based on official documentation by Mohd Zulkifli & Baha (2011)
+ * Based on official documentation by Mohd Zulkifli & Baha (2011).
+ * Uses 1000 1m candles aggregated to 5m for more accurate break/retest detection.
  */
 
 import type { Candle } from '../../store/candlesStore';
+
+// ──── AGGREGATION: 1m → 5m ────
+const AGGR_PERIOD_MINUTES = 5;
+const AGGR_PERIOD_SECONDS = AGGR_PERIOD_MINUTES * 60;
+
+/**
+ * Aggregate 1m candles into 5m (or other period).
+ * OHLC: open=first open, high=max high, low=min low, close=last close; time=period start.
+ */
+function aggregateCandles(candles: Candle[], periodSeconds: number): Candle[] {
+  if (!candles.length) return [];
+  const buckets = new Map<number, Candle[]>();
+  for (const c of candles) {
+    const bucketTime = Math.floor(c.time / periodSeconds) * periodSeconds;
+    if (!buckets.has(bucketTime)) buckets.set(bucketTime, []);
+    buckets.get(bucketTime)!.push(c);
+  }
+  const result: Candle[] = [];
+  const sortedTimes = [...buckets.keys()].sort((a, b) => a - b);
+  for (const t of sortedTimes) {
+    const group = buckets.get(t)!;
+    const first = group[0];
+    const last = group[group.length - 1];
+    let high = first.high;
+    let low = first.low;
+    let volume = 0;
+    for (const c of group) {
+      if (c.high > high) high = c.high;
+      if (c.low < low) low = c.low;
+      volume += c.volume ?? 0;
+    }
+    result.push({
+      time: t,
+      open: first.open,
+      high,
+      low,
+      close: last.close,
+      volume,
+    });
+  }
+  return result;
+}
 
 // ──── FIBONACCI SETTINGS ────
 const FIBONACCI_RATIOS = {
@@ -43,6 +86,8 @@ export interface FMCBRSignal {
   entryMajor: number;
   entryMinor: number;
   status: 'WAITING_BREAK' | 'WAITING_CB1' | 'WAITING_RETEST' | 'READY';
+  /** Time (seconds) of break/CB1 candle for marker placement on chart */
+  signalTime?: number;
 }
 
 // ──── Helper: Get trend direction ────
@@ -329,18 +374,30 @@ function calculateFibonacciEntry(
 }
 
 // ──── Main FMCBR Strategy ────
+/** Minimum 1m candles to aggregate (e.g. 200 1m → 40 5m) */
+const MIN_1M_CANDLES = 200;
+/** Use last N 1m candles for aggregation (official: 1000) */
+const LOOKBACK_1M = 1000;
+
 export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
   // CRITICAL: Use only closed candles to prevent repainting
   const closedCandles = candles.slice(0, candles.length - 1);
-  
-  // Require at least 200 candles for stable calculation (was 50)
-  if (!closedCandles || closedCandles.length < 200) {
+
+  if (!closedCandles || closedCandles.length < MIN_1M_CANDLES) {
     return null;
   }
-  
-  // Use last 1000 candles for better swing detection and calibration (was all candles)
-  const data = closedCandles.length > 1000 ? closedCandles.slice(-1000) : closedCandles;
-  
+
+  // Use last 1000 1m candles, then convert to 5m for algorithm (more accurate)
+  const data1m = closedCandles.length > LOOKBACK_1M
+    ? closedCandles.slice(-LOOKBACK_1M)
+    : closedCandles;
+  const data = aggregateCandles(data1m, AGGR_PERIOD_SECONDS);
+
+  // Need enough 5m bars for break/CB1 detection (e.g. 40+ bars)
+  if (data.length < 40) {
+    return null;
+  }
+
   try {
     // Step 1: Detect IB or DB
     // Look for breaks in the last 50 candles (was 20) for more stable detection
@@ -372,13 +429,13 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
         status: 'WAITING_BREAK',
       };
     }
-    
-    // Determine direction
-    const breakCandle = candles[breakIndex];
+
+    // Determine direction (use data = 5m candles)
+    const breakCandle = data[breakIndex];
     const direction: 'BULLISH' | 'BEARISH' = breakCandle.close > breakCandle.open ? 'BULLISH' : 'BEARISH';
-    
-    // Step 2: Detect CB1
-    const cb1Detected = detectCB1(candles, breakIndex);
+
+    // Step 2: Detect CB1 (on 5m series)
+    const cb1Detected = detectCB1(data, breakIndex);
     
     if (!cb1Detected) {
       // Find swing points for potential setup
@@ -407,7 +464,7 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
       };
     }
     
-    // Step 3: Find swing points for Fibonacci calculation
+    // Step 3: Find swing points for Fibonacci (on 5m)
     const pattern = findABCPattern(data, breakIndex);
     if (!pattern) {
       return {
@@ -465,6 +522,7 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
       entryMajor: entryLevels.majorEntry,
       entryMinor: entryLevels.minorEntry,
       status: 'READY',
+      signalTime: data[data.length - 1]?.time,
     };
   } catch (error) {
     console.error('Error calculating FMCBR:', error);

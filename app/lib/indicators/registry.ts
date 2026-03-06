@@ -46,15 +46,16 @@ export const INDICATOR_REGISTRY: Record<string, IndicatorConfig> = {
     hasSettings: true,
     icon: '📈',
   },
-  // TrendScalp Indicator
-  trendScalp: {
-    id: 'trendScalp',
-    name: 'TrendScalp',
+  // FMCBR (Fibo Musang Candle Break Retest) — Core Engine; toggled via "Keep Live" in header.
+  // Replaces TrendScalp: uses 1000 1m candles → 5m aggregation, IB/DB + CB1 + Fibonacci levels.
+  fmcbr: {
+    id: 'fmcbr',
+    name: 'FMCBR 3.0',
     category: 'support-resistance',
-    description: 'Swing-point, multi-timeframe scalping with support/resistance and swing levels',
+    description: 'Fibo Musang Candle Break Retest: 5m break/retest + Fib levels (entry & TP). Turn on via Core Engine / Keep Live.',
     defaultEnabled: false,
-    hasSettings: true,
-    icon: '🚀',
+    hasSettings: false,
+    icon: '📐',
   },
 };
 

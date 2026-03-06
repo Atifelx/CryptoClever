@@ -250,57 +250,29 @@ export default function UnifiedMarkerManager({
       }
     }
 
-    // ──── FMCBR CORE ENGINE MARKERS (render levels as circles like Semafor) ────
-    // Show markers even when not READY, but with different visuals
+    // ──── FMCBR CORE ENGINE MARKERS (circle + directional arrow, same design as Semafor) ────
     if (showFMCBR && fmcbrSignal) {
-      console.log('[FMCBR Markers] Rendering markers:', {
-        showFMCBR,
-        hasSignal: !!fmcbrSignal,
-        status: fmcbrSignal.status,
-        levelsCount: fmcbrSignal.levels?.length || 0,
-        breakType: fmcbrSignal.breakType,
-        direction: fmcbrSignal.direction,
-      });
       const { levels, direction, breakType, cb1 } = fmcbrSignal;
-      
-      // Color scheme
+
       const colors = {
-        bullish: {
-          entry: '#00ff66',      // Green for entries
-          tp: '#ffaa00',         // Orange for TP
-          base: '#ff2222',       // Red for base
-          setup: '#00aaff',      // Blue for setup
-        },
-        bearish: {
-          entry: '#ff2222',     // Red for entries
-          tp: '#ffaa00',         // Orange for TP
-          base: '#00ff66',       // Green for base
-          setup: '#00aaff',      // Blue for setup
-        },
+        bullish: { entry: '#00ff66', tp: '#ffaa00', base: '#ff2222', setup: '#00aaff' },
+        bearish: { entry: '#ff2222', tp: '#ffaa00', base: '#00ff66', setup: '#00aaff' },
       };
-      
       const scheme = direction === 'BULLISH' ? colors.bullish : colors.bearish;
-      
-      // Get reference time for marker placement
-      let referenceTime: number | null = currentCandleTime || null;
-      
+
+      let referenceTime: number | null = fmcbrSignal.signalTime ?? currentCandleTime ?? null;
       if (referenceTime === null) {
-        if (semaforPoints.length > 0) {
-          referenceTime = semaforPoints[semaforPoints.length - 1].time;
-        } else if (scalpSignals.length > 0) {
-          referenceTime = scalpSignals[scalpSignals.length - 1].time;
-        } else if (trendMarker) {
-          referenceTime = trendMarker.time;
-        }
+        if (semaforPoints.length > 0) referenceTime = semaforPoints[semaforPoints.length - 1].time;
+        else if (scalpSignals.length > 0) referenceTime = scalpSignals[scalpSignals.length - 1].time;
+        else if (trendMarker) referenceTime = trendMarker.time;
       }
-      
-      // If no reference time, skip rendering (will render when candles are available)
+
       if (referenceTime !== null) {
-        // Render status indicator first
-        const statusColor = fmcbrSignal.status === 'READY' ? '#00ff66' : 
-                           fmcbrSignal.status === 'WAITING_CB1' ? '#ffaa00' :
-                           fmcbrSignal.status === 'WAITING_RETEST' ? '#ff6600' : '#888888';
-        
+        const statusColor = fmcbrSignal.status === 'READY' ? '#00ff66' :
+          fmcbrSignal.status === 'WAITING_CB1' ? '#ffaa00' :
+          fmcbrSignal.status === 'WAITING_RETEST' ? '#ff6600' : '#888888';
+
+        // 1) Circle — status (same arrow design as Semafor/Scalp)
         allMarkers.push({
           time: referenceTime as any,
           position: 'inBar',
@@ -309,45 +281,54 @@ export default function UnifiedMarkerManager({
           size: 2.5,
           text: `FMCBR: ${fmcbrSignal.status}${breakType ? ` (${breakType})` : ''}${cb1 ? ' CB1✓' : ''}`,
         });
-        
-        // Render each level as a circle marker (only if levels exist)
-        if (levels && levels.length > 0) {
-          levels.forEach(level => {
-          let color = '#888888';
-          let size = 1.5;
-          let position: 'aboveBar' | 'belowBar' | 'inBar' = 'inBar';
-          
-          // Determine position and style based on level type
-          if (level.type === 'base') {
-            color = scheme.base;
-            size = 2.5;
-            position = direction === 'BULLISH' ? 'aboveBar' : 'belowBar';
-          } else if (level.type === 'setup') {
-            color = scheme.setup;
-            size = 2.5;
-            position = direction === 'BULLISH' ? 'belowBar' : 'aboveBar';
-          } else if (level.type === 'entry') {
-            color = scheme.entry;
-            size = 2.0;
-            position = direction === 'BULLISH' ? 'belowBar' : 'aboveBar';
-          } else if (level.type === 'tp') {
-            color = scheme.tp;
-            size = 1.5;
-            position = direction === 'BULLISH' ? 'aboveBar' : 'belowBar';
-          }
-          
-          // Create marker for this level with price info in text
+
+        // 2) Directional arrow — show as soon as we have break + direction (same as before decoupling).
+        // READY = full setup (entry/TP lines). Arrow shows early on IB/DB + direction so user sees signal on the drop.
+        if ((direction === 'BULLISH' || direction === 'BEARISH') && (breakType === 'IB' || breakType === 'DB')) {
+          const isUp = direction === 'BULLISH';
           allMarkers.push({
             time: referenceTime as any,
-            position,
-            color,
-            shape: 'circle',
-            size,
-            text: `${level.label}: ${level.price.toFixed(2)}`,
+            position: isUp ? 'belowBar' : 'aboveBar',
+            color: isUp ? '#80ffbb' : '#ff9999',
+            shape: isUp ? 'arrowUp' : 'arrowDown',
+            size: 2.0,
+            text: isUp ? 'FMCBR LONG' : 'FMCBR SHORT',
           });
+        }
+
+        // Level circles (only when levels exist; horizontal lines are in FMCBROverlay)
+        if (levels && levels.length > 0) {
+          levels.forEach(level => {
+            let color = '#888888';
+            let size = 1.5;
+            let position: 'aboveBar' | 'belowBar' | 'inBar' = 'inBar';
+            if (level.type === 'base') {
+              color = scheme.base;
+              size = 2.5;
+              position = direction === 'BULLISH' ? 'aboveBar' : 'belowBar';
+            } else if (level.type === 'setup') {
+              color = scheme.setup;
+              size = 2.5;
+              position = direction === 'BULLISH' ? 'belowBar' : 'aboveBar';
+            } else if (level.type === 'entry') {
+              color = scheme.entry;
+              size = 2.0;
+              position = direction === 'BULLISH' ? 'belowBar' : 'aboveBar';
+            } else if (level.type === 'tp') {
+              color = scheme.tp;
+              size = 1.5;
+              position = direction === 'BULLISH' ? 'aboveBar' : 'belowBar';
+            }
+            allMarkers.push({
+              time: referenceTime as any,
+              position,
+              color,
+              shape: 'circle',
+              size,
+              text: `${level.label}: ${level.price.toFixed(2)}`,
+            });
           });
         } else {
-          // Show waiting status if no levels yet
           allMarkers.push({
             time: referenceTime as any,
             position: direction === 'BULLISH' ? 'belowBar' : 'aboveBar',

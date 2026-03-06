@@ -14,11 +14,8 @@ import { getTrendDisplayItem } from '../../lib/indicators/trendIndicator';
 import type { TrendMarker } from '../../lib/indicators/trendIndicator';
 import { calculateFMCBR } from '../../lib/indicators/fmcbr';
 import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
-import { generateTrendScalpSignal, getTrendScalpDisplayItems } from '../../lib/indicators/trendScalp';
-import type { TrendScalpDisplayItem, TrendScalpResult } from '../../lib/indicators/trendScalp';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
 import FMCBROverlay from './FMCBROverlay';
-import TrendScalpOverlay from './TrendScalpOverlay';
 import TrendIndicatorOverlay from './TrendIndicatorOverlay';
 import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
@@ -60,7 +57,6 @@ export default function TradingChart({
   const isCleaningUpRef = useRef<boolean>(false);
 
   const { candles, isConnected, isLoading } = useCandles(symbol);
-  const { keepLiveAnalysis } = useTradingStore();
 
   // ─── Single source of truth: candles are for the SELECTED symbol only (same logic as BTC).
   // useCandles(symbol) returns getCandlesForSymbol(symbol) from Zustand — never BTC or another symbol's data.
@@ -172,122 +168,35 @@ export default function TradingChart({
     isLoading,
   ]);
 
-  // FMCBR Core Engine — Official FMCBR 3.0 Algorithm
+  // FMCBR — runs like other indicators when enabled. Needs 200+ closed candles (no dependency on Core Engine).
   const fmcbrSignal = useMemo((): FMCBRSignal | null => {
     if (typeof window === 'undefined') return null;
-    // Require at least 200 closed candles for stable calculation (was 50)
     const closedCandles = candles.slice(0, candles.length - 1);
-    if (isLoading || closedCandles.length < 200) {
-      console.log('[FMCBR] Not calculating - isLoading:', isLoading, 'closedCandles:', closedCandles.length);
+    // Require enough data; do NOT block on isLoading so FMCBR can show as soon as candles exist
+    if (closedCandles.length < 200) {
+      if (process.env.NODE_ENV === 'development' && closedCandles.length > 0) {
+        console.log('[FMCBR] Waiting for more candles:', closedCandles.length, '/ 200');
+      }
       return null;
     }
 
     try {
-      // Pass all candles - function will use closed candles internally
       const signal = calculateFMCBR(candles);
-      console.log('[FMCBR] Calculated signal:', {
-        status: signal?.status,
-        breakType: signal?.breakType,
-        direction: signal?.direction,
-        cb1: signal?.cb1,
-        levelsCount: signal?.levels?.length || 0,
-        hasLevels: signal?.levels && signal.levels.length > 0,
-        candlesUsed: closedCandles.length,
-      });
+      if (process.env.NODE_ENV === 'development' && signal) {
+        console.log('[FMCBR] Signal:', signal.status, signal.breakType, signal.direction);
+      }
       return signal;
     } catch (error) {
       console.error('[FMCBR] Calculation error:', error);
       return null;
     }
   }, [
+    symbol,
+    candles,
     candles.length,
     candles[candles.length - 1]?.time,
     candles[candles.length - 1]?.close,
-    symbol,
-    isLoading,
   ]);
-
-  // TrendScalp Indicator — Swing-point, multi-timeframe scalping with S/R and swing levels
-  const trendScalpResult = useMemo((): TrendScalpResult | null => {
-    const isIndicatorEnabled = enabledIndicators.has('trendScalp');
-    
-    if (typeof window === 'undefined') {
-      if (process.env.NODE_ENV === 'development' && isIndicatorEnabled) {
-        console.log('[TrendScalp] Server-side render - skipping');
-      }
-      return null;
-    }
-    
-    if (!isIndicatorEnabled) {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[TrendScalp] Indicator disabled');
-      }
-      return null;
-    }
-    
-    if (isLoading || candles.length < 720) {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[TrendScalp] Waiting for data:', { 
-          isLoading, 
-          candlesLength: candles.length,
-          required: 720,
-          enabled: isIndicatorEnabled,
-        });
-      }
-      return null;
-    }
-
-    try {
-      return generateTrendScalpSignal(candles);
-    } catch (error) {
-      console.error('[TrendScalp] Calculation error:', error);
-      if (process.env.NODE_ENV === 'development') {
-        console.error('[TrendScalp] Error details:', {
-          enabled: isIndicatorEnabled,
-          candlesLength: candles.length,
-          isLoading,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-      return null;
-    }
-  }, [
-    candles.length,
-    candles[candles.length - 2]?.time,
-    candles[candles.length - 2]?.close,
-    candles[candles.length - 1]?.time,
-    symbol,
-    isLoading,
-    enabledIndicators,
-  ]);
-
-  const trendScalpSignals = useMemo((): TrendScalpDisplayItem[] => {
-    const trendScalpEnabled = enabledIndicators.has('trendScalp');
-    if (trendScalpEnabled && !trendScalpResult) {
-      // Show helpful WAIT when we don't have enough data (e.g. need 1001 candles)
-      let lastClosedTime = candles.length > 0 ? candles[candles.length - 1]?.time : Math.floor(Date.now() / 1000);
-      if (candles.length >= 2) lastClosedTime = candles[candles.length - 2]?.time ?? lastClosedTime;
-      const reason = candles.length < 720
-        ? `Need 720 candles (have ${candles.length})`
-        : 'Calculating...';
-      return [{ time: lastClosedTime, signal: 'WAIT', reason }];
-    }
-    if (!trendScalpResult) return [];
-    let lastClosedTime = candles[candles.length - 2]?.time;
-    if (!lastClosedTime || lastClosedTime === 0) {
-      lastClosedTime = candles[candles.length - 1]?.time;
-      if (!lastClosedTime || lastClosedTime === 0) lastClosedTime = Math.floor(Date.now() / 1000);
-    }
-    const displayItems = getTrendScalpDisplayItems(trendScalpResult, lastClosedTime);
-    if (process.env.NODE_ENV === 'development' && trendScalpResult) {
-      console.log('[TrendScalp] Signal generated:', {
-        signal: trendScalpResult.signal,
-        strength: trendScalpResult.signalStrength,
-        displayItemsCount: displayItems.length,
-      });
-    }
-    return displayItems;
-  }, [trendScalpResult, candles.length, candles[candles.length - 2]?.time, symbol, enabledIndicators]);
 
   // Expose indicator data to parent component (deferred to avoid setState-during-render)
   useEffect(() => {
@@ -843,24 +752,19 @@ export default function TradingChart({
               semaforPoints={isEnabled('semafor') ? semaforPoints : []}
               scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
               trendMarker={null} // Trend indicator now uses overlay, not markers
-              fmcbrSignal={keepLiveAnalysis ? fmcbrSignal : null}
-              trendScalpSignals={isEnabled('trendScalp') ? trendScalpSignals : []}
+              fmcbrSignal={isEnabled('fmcbr') ? fmcbrSignal : null}
+              trendScalpSignals={[]}
               currentCandleTime={candles.length > 0 ? candles[candles.length - 1]?.time : undefined}
               showSemafor={isEnabled('semafor')}
               showScalp={isEnabled('scalpSignal')}
-              showTrend={false} // Trend indicator now uses overlay, not markers
-              showFMCBR={keepLiveAnalysis}
-              showTrendScalp={isEnabled('trendScalp')}
+              showTrend={false}
+              showFMCBR={isEnabled('fmcbr')}
+              showTrendScalp={false}
             />
             <FMCBROverlay
               candleSeries={candleSeriesRef.current}
-              signal={keepLiveAnalysis ? fmcbrSignal : null}
-              showFMCBR={keepLiveAnalysis}
-            />
-            <TrendScalpOverlay
-              candleSeries={candleSeriesRef.current}
-              result={isEnabled('trendScalp') ? trendScalpResult : null}
-              showTrendScalp={isEnabled('trendScalp')}
+              signal={isEnabled('fmcbr') ? fmcbrSignal : null}
+              showFMCBR={isEnabled('fmcbr')}
             />
           </>
         )}
