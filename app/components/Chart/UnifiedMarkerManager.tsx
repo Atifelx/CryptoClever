@@ -272,19 +272,24 @@ export default function UnifiedMarkerManager({
           fmcbrSignal.status === 'WAITING_CB1' ? '#ffaa00' :
           fmcbrSignal.status === 'WAITING_RETEST' ? '#ff6600' : '#888888';
 
-        // 1) Circle — status (same arrow design as Semafor/Scalp)
+        const hasSignal = (direction === 'BULLISH' || direction === 'BEARISH') && (breakType === 'IB' || breakType === 'DB');
+        const signalLabel = direction === 'BULLISH' ? 'LONG' : direction === 'BEARISH' ? 'SHORT' : null;
+
+        // 1) Circle — when we already have LONG/SHORT signal, show clean label only (no "Waiting" text)
+        const statusText = hasSignal && signalLabel
+          ? (fmcbrSignal.status === 'READY' ? `FMCBR ${signalLabel} (${breakType}) CB1 ✓` : `FMCBR ${signalLabel} (${breakType})`)
+          : `FMCBR: ${fmcbrSignal.status}${breakType ? ` (${breakType})` : ''}${cb1 ? ' CB1✓' : ''}`;
         allMarkers.push({
           time: referenceTime as any,
           position: 'inBar',
           color: statusColor,
           shape: 'circle',
           size: 2.5,
-          text: `FMCBR: ${fmcbrSignal.status}${breakType ? ` (${breakType})` : ''}${cb1 ? ' CB1✓' : ''}`,
+          text: statusText,
         });
 
-        // 2) Directional arrow — show as soon as we have break + direction (same as before decoupling).
-        // READY = full setup (entry/TP lines). Arrow shows early on IB/DB + direction so user sees signal on the drop.
-        if ((direction === 'BULLISH' || direction === 'BEARISH') && (breakType === 'IB' || breakType === 'DB')) {
+        // 2) Directional arrow — show as soon as we have break + direction
+        if (hasSignal) {
           const isUp = direction === 'BULLISH';
           allMarkers.push({
             time: referenceTime as any,
@@ -328,16 +333,8 @@ export default function UnifiedMarkerManager({
               text: `${level.label}: ${level.price.toFixed(2)}`,
             });
           });
-        } else {
-          allMarkers.push({
-            time: referenceTime as any,
-            position: direction === 'BULLISH' ? 'belowBar' : 'aboveBar',
-            color: '#888888',
-            shape: 'circle',
-            size: 1.5,
-            text: `Waiting for ${fmcbrSignal.status.replace('WAITING_', '').toLowerCase()}...`,
-          });
         }
+        // When we have LONG/SHORT signal, do not add "Waiting for cb1..." — keeps chart clean
       }
     }
 
