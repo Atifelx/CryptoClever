@@ -307,7 +307,32 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   
   const isClearUptrend = bullishRatio >= 0.7 && netPriceChange > 0.001; // 70% bullish + price up >0.1%
   const isClearDowntrend = bearishRatio >= 0.7 && netPriceChange < -0.001; // 70% bearish + price down >0.1%
-  
+
+  // ──── RECENT FALL SWING (1m: block LONG after sudden drop) ────
+  // Last 4 candles: if ≥3 bearish and net change < -0.1%, do not show LONG; prefer WAIT or SHORT
+  const recentLookback = 4;
+  let recentFallSwing = false;
+  if (data.length >= recentLookback) {
+    const last4 = data.slice(-recentLookback);
+    const last4Closes = last4.map(c => c.close);
+    let bearishCount = 0;
+    for (let i = 1; i < last4Closes.length; i++) {
+      if (last4Closes[i] < last4Closes[i - 1]) bearishCount++;
+    }
+    const netChange4 = (last4Closes[last4Closes.length - 1] - last4Closes[0]) / last4Closes[0];
+    if (bearishCount >= 3 && netChange4 < -0.001) {
+      recentFallSwing = true;
+    }
+    // Also: last 3 candles all red (strong fall)
+    if (!recentFallSwing && data.length >= 3) {
+      const last3 = data.slice(-3);
+      const last3Closes = last3.map(c => c.close);
+      const all3Red = last3Closes[1] < last3Closes[0] && last3Closes[2] < last3Closes[1];
+      const drop3 = (last3Closes[2] - last3Closes[0]) / last3Closes[0];
+      if (all3Red && drop3 < -0.0015) recentFallSwing = true;
+    }
+  }
+
   // ──── SWING REVERSAL DETECTION (Last 5 candles) ────
   // Fast detection for quick trade entry
   let swingReversalLong = false;
@@ -390,7 +415,11 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const STOP_LOSS_PCT = 0.004; // 0.4%
 
   // RELAXED THRESHOLD: Require 4/6 conditions (was 5/6) OR strong momentum OR BB mean reversion OR swing reversal
-  if (longScore >= 4 || bbLong || strongMomentumLong || swingReversalLong) {
+  // BLOCK LONG when recent fall swing (1m: do not show strong buy after 3+ down candles)
+  if (
+    !recentFallSwing &&
+    (longScore >= 4 || bbLong || strongMomentumLong || swingReversalLong)
+  ) {
     // LONG signal
     const stopLoss = currentClose * (1 - STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 + TAKE_PROFIT_PCT);
@@ -422,8 +451,11 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       rsi: currentRSI,
       volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.0 ? 'MODERATE' : 'NORMAL',
     };
-  } else if ((shortScore >= 4 || bbShort || strongMomentumShort || swingReversalShort) && !isClearUptrend) {
-    // SHORT signal
+  } else if (
+    !isClearUptrend &&
+    (shortScore >= 4 || bbShort || strongMomentumShort || swingReversalShort || (recentFallSwing && shortScore >= 3))
+  ) {
+    // SHORT signal (relaxed to shortScore >= 3 when recent fall swing detected)
     const stopLoss = currentClose * (1 + STOP_LOSS_PCT);
     const takeProfit1 = currentClose * (1 - TAKE_PROFIT_PCT);
     const takeProfit2 = currentClose * (1 - TAKE_PROFIT_PCT * 1.5); // Extended TP
@@ -436,6 +468,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     else if (bbShort) confidence = 75; // BB mean reversion
     else if (shortScore >= 5) confidence = 80;
     else if (shortScore === 4) confidence = 70; // Relaxed threshold
+    else if (recentFallSwing && shortScore === 3) confidence = 65; // Recent fall swing, lower bar for SHORT
 
     return {
       signal: 'SHORT',
@@ -450,6 +483,8 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
         ? `Strong momentum (${currentMomentum.toFixed(2)}%)`
         : bbShort 
         ? 'Bollinger Band mean reversion (overbought)' 
+        : recentFallSwing && shortScore === 3
+        ? `Recent fall swing (${shortScore}/6 conditions)`
         : `EMA trend + momentum (${shortScore}/6 conditions, vol: ${volumeRatio.toFixed(2)}x)`,
       marketState: 'BEARISH_TREND',
       rsi: currentRSI,

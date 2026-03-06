@@ -9,7 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
-from app.binance_ws import bootstrap_all, get_stream_status, run_binance_ws
+from app.binance_ws import bootstrap_all, get_stream_status, run_binance_ws_for_symbol
 from app.config import INTERVALS, SYMBOLS
 from app.redis_store import get_candles, get_signals, set_signals, close_redis, get_last_append_time, append_candle, get_store_keys_info
 from app.utils import build_candle_key, normalize_interval, normalize_symbol
@@ -20,12 +20,12 @@ from app import ws_broadcast as ws_broadcast
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-_ws_task: Optional[asyncio.Task] = None
+_ws_tasks: list[asyncio.Task] = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _ws_task
+    global _ws_tasks
     try:
         await db.init_db()
         logger.info("Database tables ready")
@@ -33,15 +33,13 @@ async def lifespan(app: FastAPI):
         logger.warning("Database init skipped or failed: %s", e)
     logger.info("Bootstrapping candles from Binance REST...")
     await bootstrap_all()
-    _ws_task = asyncio.create_task(run_binance_ws())
-    logger.info("Binance WebSocket task started")
+    _ws_tasks = [asyncio.create_task(run_binance_ws_for_symbol(sym)) for sym in SYMBOLS]
+    logger.info("Binance WebSocket tasks started (one per symbol: %s)", list(SYMBOLS))
     yield
-    if _ws_task:
-        _ws_task.cancel()
-        try:
-            await _ws_task
-        except asyncio.CancelledError:
-            pass
+    for t in _ws_tasks:
+        t.cancel()
+    if _ws_tasks:
+        await asyncio.gather(*_ws_tasks, return_exceptions=True)
     await close_redis()
     logger.info("Backend shutdown complete")
 
@@ -362,15 +360,14 @@ _HISTORICAL_INTERVAL_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m
 
 @app.get("/api/historical/{symbol}")
 async def api_historical(symbol: str, interval: str = "1m", hours: int = 12):
-    """Proposal API: historical candles (time in ms, is_closed true). BTC 1m only."""
+    """Proposal API: historical candles (time in ms, is_closed true). Any symbol in SYMBOLS, 1m."""
     symbol = normalize_symbol(symbol)
     interval = normalize_interval(interval)
-    
-    # VALIDATION: Only BTCUSDT 1m supported
-    if symbol != "BTCUSDT":
-        raise HTTPException(status_code=400, detail=f"Only BTCUSDT is supported. Requested: {symbol}")
-    if interval != "1m":
-        raise HTTPException(status_code=400, detail=f"Only 1m interval is supported. Requested: {interval}")
+
+    if symbol not in SYMBOLS:
+        raise HTTPException(status_code=400, detail=f"Symbol not supported. Requested: {symbol}. Supported: {list(SYMBOLS)}")
+    if interval not in INTERVALS:
+        raise HTTPException(status_code=400, detail=f"Interval not supported. Requested: {interval}. Supported: {INTERVALS}")
     
     interval_sec = _HISTORICAL_INTERVAL_SECONDS.get(interval, 60)
     limit = min(1000, max(1, int(hours * 3600 / interval_sec)))
@@ -1014,14 +1011,13 @@ async def verify_live():
 async def websocket_proposal(websocket: WebSocket, symbol: str):
     """
     Proposal API: on connect send historical (type 'historical') then stream live_candle.
-    BTC 1m only.
+    Any symbol in SYMBOLS, 1m.
     """
     symbol = normalize_symbol(symbol)
     await websocket.accept()
-    
-    # VALIDATION: Only BTCUSDT supported
-    if symbol != "BTCUSDT":
-        await websocket.send_json({"type": "error", "message": f"Only BTCUSDT is supported. Requested: {symbol}"})
+
+    if symbol not in SYMBOLS:
+        await websocket.send_json({"type": "error", "message": f"Symbol not supported. Requested: {symbol}. Supported: {list(SYMBOLS)}"})
         await websocket.close(code=4000)
         return
     
@@ -1054,8 +1050,8 @@ async def websocket_proposal(websocket: WebSocket, symbol: str):
 @app.websocket("/ws/candles/{symbol}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str):
     """
-    Single feed: subscribe this client to (symbol, 1m) via ws_broadcast. No per-symbol Binance connection.
-    Live data comes from run_binance_ws and is broadcast to all subscribers. Kept for backward compatibility.
+    Single feed: subscribe this client to (symbol, 1m) via ws_broadcast.
+    Live data comes from per-symbol Binance WS tasks and is broadcast to all subscribers.
     Prefer /ws/candles with subscription payload for new clients.
     """
     symbol = normalize_symbol(symbol)
@@ -1108,27 +1104,25 @@ async def websocket_candles(websocket: WebSocket):
 
 @app.get("/candles/{symbol}/{interval}")
 async def candles(symbol: str, interval: str, limit: int = 500):
-    """Return last `limit` candles for symbol/interval from Redis. Single source of truth; Binance WS keeps this updated."""
+    """Return last `limit` candles for symbol/interval from Redis. Single source of truth; per-symbol Binance WS keeps this updated."""
     import sys
     print(f"\n{'='*80}", file=sys.stderr)
     print(f"[FRONTEND_REQUEST] Raw symbol from URL path: '{symbol}'", file=sys.stderr)
     print(f"[FRONTEND_REQUEST] Raw interval from URL path: '{interval}'", file=sys.stderr)
     print(f"[FRONTEND_REQUEST] Limit: {limit}", file=sys.stderr)
-    
-    # VALIDATION: Only BTCUSDT 1m supported
+
     if limit < 1 or limit > 1000:
         limit = 500
     symbol_normalized = normalize_symbol(symbol)
     interval_normalized = normalize_interval(interval)
-    
-    # Enforce BTC 1m only
-    if symbol_normalized != "BTCUSDT":
-        print(f"[REJECTED] Symbol '{symbol_normalized}' not supported. Only BTCUSDT allowed.", file=sys.stderr)
-        raise HTTPException(status_code=400, detail=f"Only BTCUSDT is supported. Requested: {symbol_normalized}")
-    
-    if interval_normalized != "1m":
-        print(f"[REJECTED] Interval '{interval_normalized}' not supported. Only 1m allowed.", file=sys.stderr)
-        raise HTTPException(status_code=400, detail=f"Only 1m interval is supported. Requested: {interval_normalized}")
+
+    if symbol_normalized not in SYMBOLS:
+        print(f"[REJECTED] Symbol '{symbol_normalized}' not in SYMBOLS. Allowed: {list(SYMBOLS)}", file=sys.stderr)
+        raise HTTPException(status_code=400, detail=f"Symbol not supported. Requested: {symbol_normalized}. Supported: {list(SYMBOLS)}")
+
+    if interval_normalized not in INTERVALS:
+        print(f"[REJECTED] Interval '{interval_normalized}' not supported. Allowed: {INTERVALS}", file=sys.stderr)
+        raise HTTPException(status_code=400, detail=f"Interval not supported. Requested: {interval_normalized}. Supported: {INTERVALS}")
     
     print(f"[NORMALIZED] Symbol: '{symbol_normalized}' | Interval: '{interval_normalized}'", file=sys.stderr)
     key = build_candle_key(symbol_normalized, interval_normalized)

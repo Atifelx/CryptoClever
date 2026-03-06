@@ -379,6 +379,8 @@ export default function UnifiedMarkerManager({
       candleSeries.setMarkers(allMarkers);
       markersRef.current = allMarkers;
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.toLowerCase().includes('disposed')) return; // Chart was disposed (e.g. symbol change)
       console.error('Unified marker error:', error);
     }
   }, [candleSeries, semaforPoints, scalpSignals, trendMarker, fmcbrSignal, trendScalpSignals, currentCandleTime, showSemafor, showScalp, showTrend, showFMCBR, showTrendScalp]);

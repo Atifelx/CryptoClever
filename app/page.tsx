@@ -20,7 +20,7 @@ export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
   const { selectedSymbol, selectedTimeframe } = useTradingStore();
   useBackendSettingsSync();
-  useBackendCandlesLoader(); // Load all 10 symbols into Zustand, poll backend every 30s
+  useBackendCandlesLoader(selectedSymbol || 'BTCUSDT');
   // Live candles are provided by `useCandles()` inside `TradingChart` (per-symbol WS).
   
   // Initialize enabled indicators from registry defaults

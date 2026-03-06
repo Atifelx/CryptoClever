@@ -5,9 +5,12 @@ from dotenv import load_dotenv
 # Load .env from backend directory so DATABASE_URL etc. can override defaults
 load_dotenv()
 
-# Only BTC 1m - Reduced server workload
+# BTC + SOL, BNB, XRP (1m)
 SYMBOLS = [
     "BTCUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
 ]
 
 # Only 1m interval for minimal server load

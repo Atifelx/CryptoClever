@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from collections import deque
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 import websockets
@@ -34,18 +34,18 @@ def _interval_seconds(interval: str) -> int:
     return INTERVAL_SECONDS.get(normalize_interval(interval), 60)
 
 
-# Debug pipeline: stream connection state and last N candles from Binance WS
-_binance_ws_connected = False
-_last_received_at: float = 0.0
+# Debug pipeline: per-symbol stream state and last N candles from Binance WS
+_stream_status: dict[str, dict[str, Any]] = {}  # symbol -> { connected, last_received_at }
 RECENT_STREAM_MAX = 20
 _recent_stream_candles: deque = deque(maxlen=RECENT_STREAM_MAX)
 
 
 def get_stream_status() -> dict[str, Any]:
-    """Return stream status for /debug/binance-pipeline: connected, last_received_at, recent_candles."""
+    """Return stream status for /debug/binance-pipeline: per-symbol connected/last_received_at, recent_candles."""
     return {
-        "connected": _binance_ws_connected,
-        "last_received_at": _last_received_at,
+        "connected": any(s.get("connected") for s in _stream_status.values()),
+        "last_received_at": max((s.get("last_received_at") or 0) for s in _stream_status.values()) if _stream_status else 0,
+        "per_symbol": dict(_stream_status),
         "recent_candles": list(_recent_stream_candles),
     }
 
@@ -149,77 +149,52 @@ async def bootstrap_all() -> None:
     logger.info("[BOOTSTRAP_COMPLETE]")
 
 
-def _build_streams() -> str:
-    """Build combined stream path: only 1m klines per symbol (live WS). Other intervals still bootstrapped via REST."""
+async def run_binance_ws_for_symbol(symbol: str) -> None:
+    """Connect to Binance single-symbol kline stream (no combined stream) and push candles to store/broadcast."""
     WS_INTERVAL = "1m"
-    parts = []
-    for sym in SYMBOLS:
-        s = sym.lower()
-        parts.append(f"{s}@kline_{WS_INTERVAL}")
-    return "/".join(parts)
-
-
-async def run_binance_ws() -> None:
-    """Connect to Binance combined kline stream and push candles to Redis."""
-    global _binance_ws_connected, _last_received_at
-    streams = _build_streams()
-    url = f"{BINANCE_WS_BASE}/stream?streams={streams}"
-    logger.info("Connecting to Binance: %s", url[:80] + "...")
+    interval = normalize_interval(WS_INTERVAL)
+    symbol_norm = normalize_symbol(symbol)
+    url = f"{BINANCE_WS_BASE}/ws/{symbol.lower()}@kline_{WS_INTERVAL}"
+    logger.info("[BINANCE_WS] Connecting to %s", url)
 
     msg_count = 0
     last_log_time = time.time()
 
     while True:
         try:
+            _stream_status[symbol_norm] = {"connected": False, "last_received_at": None}
             async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
-                _binance_ws_connected = True
+                _stream_status[symbol_norm]["connected"] = True
                 try:
-                    logger.info("[BINANCE_COMBINED] Connected to %d streams (1m only)", len(SYMBOLS))
+                    logger.info("[BINANCE_WS] Connected for %s (1m)", symbol_norm)
                     async for message in ws:
-                        stream = ""
                         try:
                             now = time.time()
                             if now - last_log_time >= 60:
-                                logger.info("Binance stream alive: %d updates in last 60s", msg_count)
+                                logger.info("Binance stream %s alive: %d updates in last 60s", symbol_norm, msg_count)
                                 msg_count = 0
                                 last_log_time = now
                             msg = json.loads(message)
-                            if "stream" not in msg:
-                                continue
-                            stream = msg.get("stream", "")
-                            logger.info("[BINANCE_RAW] Stream='%s'", stream)
-                            if "@kline_" not in stream:
-                                logger.warning("[BINANCE_SKIP] Unknown stream format: %s", stream)
-                                continue
-                            parts = stream.split("@kline_", 1)
-                            if len(parts) != 2:
-                                logger.error("[BINANCE_PARSE_FAIL] Cannot split stream: %s", stream)
-                                continue
-                            symbol_raw = parts[0]
-                            interval_raw = parts[1]
-                            symbol = normalize_symbol(symbol_raw)
-                            interval = normalize_interval(interval_raw)
-                            # Combined stream: kline is under msg["data"]["k"]; single stream uses msg["k"]
-                            k = (msg.get("data") or {}).get("k") or msg.get("k")
+                            # Single-stream format: kline at msg["k"] (no "stream", no "data" wrapper)
+                            k = msg.get("k")
                             if not k:
-                                logger.error("[BINANCE_NO_KLINE] Missing data.k in message for stream=%s", stream)
+                                logger.error("[BINANCE_NO_KLINE] %s: missing k in message", symbol_norm)
                                 continue
                             candle = _kline_to_candle(k)
-                            logger.info("[BINANCE_PARSED] RawSymbol='%s' | NormSymbol='%s' | RawInterval='%s' | NormInterval='%s' | Time=%s | Close=%s", symbol_raw, symbol, interval_raw, interval, candle.get("time"), candle.get("close"))
-                            _last_received_at = time.time()
+                            _stream_status[symbol_norm]["last_received_at"] = now
                             _recent_stream_candles.append({
-                                "symbol": symbol,
+                                "symbol": symbol_norm,
                                 "interval": interval,
                                 "time": candle.get("time"),
-                                "received_at": _last_received_at,
+                                "received_at": now,
                                 "candle": candle,
                             })
-                            # Gap-fill: ensure store is continuous before appending (bootstrap if empty, fill gaps from REST)
+                            # Gap-fill: ensure store is continuous before appending
                             try:
-                                data = await get_candles(symbol, interval, limit=1000)
+                                data = await get_candles(symbol_norm, interval, limit=1000)
                                 if not data:
-                                    await bootstrap_symbol_interval(symbol, interval)
-                                    data = await get_candles(symbol, interval, limit=1000)
+                                    await bootstrap_symbol_interval(symbol_norm, interval)
+                                    data = await get_candles(symbol_norm, interval, limit=1000)
                                 if data:
                                     last_ts = int(data[-1].get("time", 0))
                                     new_ts = int(candle.get("time", 0))
@@ -228,29 +203,31 @@ async def run_binance_ws() -> None:
                                         start_sec = last_ts + interval_sec
                                         end_sec = new_ts - interval_sec
                                         if end_sec >= start_sec:
-                                            gap_candles = await fetch_klines_range(symbol, interval, start_sec, end_sec)
+                                            gap_candles = await fetch_klines_range(symbol_norm, interval, start_sec, end_sec)
                                             for c in gap_candles:
-                                                await append_candle(symbol, interval, c)
+                                                await append_candle(symbol_norm, interval, c)
                             except Exception as sync_err:
-                                logger.warning("Gap-fill for %s %s failed (appending anyway): %s", symbol, interval, sync_err)
-                            await append_candle(symbol, interval, candle)
-                            await broadcast_candle(symbol, interval, candle)
-                            await broadcast_candle_proposal(symbol, interval, candle)
+                                logger.warning("Gap-fill for %s %s failed (appending anyway): %s", symbol_norm, interval, sync_err)
+                            await append_candle(symbol_norm, interval, candle)
+                            await broadcast_candle(symbol_norm, interval, candle)
+                            await broadcast_candle_proposal(symbol_norm, interval, candle)
                             msg_count += 1
                         except json.JSONDecodeError as e:
-                            logger.error("[BINANCE_JSON_ERROR] %s", e, exc_info=True)
+                            logger.error("[BINANCE_JSON_ERROR] %s: %s", symbol_norm, e, exc_info=True)
                         except KeyError as e:
-                            logger.error("[BINANCE_KEY_ERROR] Missing key %s in message", e, exc_info=True)
+                            logger.error("[BINANCE_KEY_ERROR] %s: missing key %s", symbol_norm, e, exc_info=True)
                         except Exception as e:
-                            logger.error("[BINANCE_PARSE_ERROR] Stream='%s' | Error=%s", stream, e, exc_info=True)
+                            logger.error("[BINANCE_PARSE_ERROR] %s: %s", symbol_norm, e, exc_info=True)
                             import traceback
                             traceback.print_exc()
                 finally:
-                    _binance_ws_connected = False
+                    _stream_status[symbol_norm]["connected"] = False
         except asyncio.CancelledError:
-            _binance_ws_connected = False
+            if symbol_norm in _stream_status:
+                _stream_status[symbol_norm]["connected"] = False
             break
         except Exception as e:
-            _binance_ws_connected = False
-            logger.warning("Binance WS error: %s; reconnecting in 5s", e)
+            if symbol_norm in _stream_status:
+                _stream_status[symbol_norm]["connected"] = False
+            logger.warning("Binance WS %s error: %s; reconnecting in 5s", symbol_norm, e)
             await asyncio.sleep(5)

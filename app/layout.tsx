@@ -3,6 +3,7 @@ import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import { StoreHydration } from "./components/StoreHydration";
 import CacheBuster from "./components/CacheBuster";
+import ChartErrorSuppress from "./components/ChartErrorSuppress";
 
 export const metadata: Metadata = {
   title: "CryptoClever - Trading Platform",
@@ -23,6 +24,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        {/* Suppress "Object is disposed" from lightweight-charts when switching symbols - must run before any other script */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var m=function(s){return (s||'').toLowerCase().indexOf('disposed')!==-1};window.addEventListener('error',function(e){var s=e.message||(e.error&&e.error.message)||'';if(m(s)){e.preventDefault();e.stopPropagation();if(e.stopImmediatePropagation)e.stopImmediatePropagation();return true}return false},true);window.addEventListener('unhandledrejection',function(e){var s=(e.reason&&e.reason.message)||String(e.reason||'');if(m(s)){e.preventDefault();e.stopPropagation()}},true);})();`,
+          }}
+        />
         {/* Set default timezone to Indian Standard Time (GMT+5:30) - MUST RUN FIRST */}
         <script
           dangerouslySetInnerHTML={{
@@ -106,7 +113,7 @@ export default function RootLayout({
                   return day + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' IST';
                 };
                 
-                console.log('✅ IST timezone override applied (GMT+5:30)');
+                console.log('[OK] IST timezone override applied (GMT+5:30)');
               })();
             `,
           }}
@@ -170,6 +177,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
+        <ChartErrorSuppress />
         <CacheBuster />
         <StoreHydration>
           {children}

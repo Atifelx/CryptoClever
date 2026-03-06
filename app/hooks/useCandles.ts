@@ -1,33 +1,33 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useCandlesStore, type Candle as StoreCandle } from '../store/candlesStore';
 
 /**
- * Simplified useCandles for BTC 1m only
- * Reads from Zustand store and subscribes to WebSocket for live updates
+ * useCandles(symbol) — same live flow as BTC at d4900ca: WS /ws/{symbol}, historical + live_candle → store.
+ * Must subscribe to the actual candle array so component re-renders when mergeCandleForSymbol updates (live).
  */
-export function useCandles() {
-  const btcCandles = useCandlesStore((state) => state.btcCandles);
-  const mergeBtcCandle = useCandlesStore((s) => s.mergeBtcCandle);
-  const setBtcCandles = useCandlesStore((s) => s.setBtcCandles);
-  
+export function useCandles(symbol: string) {
+  // Subscribe to this symbol's data so we re-render when store updates (live_candle merge).
+  const candles = useCandlesStore((s) => s.getCandlesForSymbol(symbol));
+  const setCandlesForSymbol = useCandlesStore((s) => s.setCandlesForSymbol);
+  const mergeCandleForSymbol = useCandlesStore((s) => s.mergeCandleForSymbol);
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
-  const getBackendWsUrl = useCallback((): string => {
+  const getBackendWsUrl = useCallback((sym: string): string => {
     if (typeof window === 'undefined') return '';
     const base = process.env.NEXT_PUBLIC_BACKEND_URL;
     if (base) {
-      return base.replace(/^http/, 'ws') + '/ws/BTCUSDT';
+      return base.replace(/^http/, 'ws') + `/ws/${sym}`;
     }
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//127.0.0.1:8000/ws/BTCUSDT`;
+    return `${proto}//127.0.0.1:8000/ws/${sym}`;
   }, []);
 
   useEffect(() => {
     let didUnmount = false;
-    
+
     const connect = () => {
       if (didUnmount) return;
       if (wsRef.current) {
@@ -37,7 +37,7 @@ export function useCandles() {
         wsRef.current = null;
       }
 
-      const wsUrl = getBackendWsUrl();
+      const wsUrl = getBackendWsUrl(symbol);
       if (!wsUrl) return;
 
       console.log('[useCandles] Connecting to:', wsUrl);
@@ -46,7 +46,7 @@ export function useCandles() {
 
       ws.onopen = () => {
         if (didUnmount) return;
-        console.log('[useCandles] WebSocket connected');
+        console.log('[useCandles] WebSocket connected for', symbol);
         setIsConnected(true);
       };
 
@@ -56,30 +56,28 @@ export function useCandles() {
           const data = JSON.parse(event.data);
 
           if (data.type === 'historical') {
-            // Initial historical data
-            const candles: StoreCandle[] = (data.data || []).map((c: any) => ({
-              time: Math.floor(c.time / 1000), // Convert ms to seconds
+            const candlesData: StoreCandle[] = (data.data || []).map((c: any) => ({
+              time: typeof c.time === 'number' ? (c.time >= 1e12 ? Math.floor(c.time / 1000) : c.time) : Math.floor((c.time || 0) / 1000),
               open: c.open,
               high: c.high,
               low: c.low,
               close: c.close,
               volume: c.volume ?? 0,
             }));
-            setBtcCandles(candles);
+            setCandlesForSymbol(symbol, candlesData);
             return;
           }
 
           if (data.type === 'live_candle') {
-            // Live candle update
             const candle: StoreCandle = {
-              time: Math.floor(data.time / 1000), // Convert ms to seconds
+              time: typeof data.time === 'number' ? (data.time >= 1e12 ? Math.floor(data.time / 1000) : data.time) : Math.floor((data.time || 0) / 1000),
               open: data.open,
               high: data.high,
               low: data.low,
               close: data.close,
               volume: data.volume ?? 0,
             };
-            mergeBtcCandle(candle);
+            mergeCandleForSymbol(symbol, candle);
             return;
           }
         } catch (error) {
@@ -93,7 +91,7 @@ export function useCandles() {
 
       ws.onclose = () => {
         if (didUnmount) return;
-        console.log('[useCandles] WebSocket closed, reconnecting in 3s...');
+        console.log('[useCandles] WebSocket closed for', symbol, ', reconnecting in 3s...');
         setIsConnected(false);
         setTimeout(() => {
           if (!didUnmount) connect();
@@ -113,11 +111,11 @@ export function useCandles() {
         wsRef.current = null;
       }
     };
-  }, [getBackendWsUrl, setBtcCandles, mergeBtcCandle]);
+  }, [symbol, getBackendWsUrl, setCandlesForSymbol, mergeCandleForSymbol]);
 
   return {
-    candles: btcCandles,
-    isLoading: btcCandles.length === 0,
+    candles,
+    isLoading: candles.length === 0,
     isConnected,
   };
 }

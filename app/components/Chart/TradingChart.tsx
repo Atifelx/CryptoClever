@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
 import { createChart, IChartApi, ISeriesApi, ColorType, Time } from 'lightweight-charts';
 import { useCandles } from '../../hooks/useCandles';
 import { useTradingStore } from '../../store/tradingStore';
@@ -56,16 +56,35 @@ export default function TradingChart({
   const isPanningRef = useRef<boolean>(false);
   const panStartXRef = useRef<number>(0);
   const panStartPositionRef = useRef<number | null>(null);
+  /** Set true during effect cleanup so resize/visibility handlers no-op. */
+  const isCleaningUpRef = useRef<boolean>(false);
 
-  const { candles, isConnected, isLoading } = useCandles();
+  const { candles, isConnected, isLoading } = useCandles(symbol);
   const { keepLiveAnalysis } = useTradingStore();
 
-  // DEBUG: Log what data TradingChart receives from useCandles
+  // ─── Single source of truth: candles are for the SELECTED symbol only (same logic as BTC).
+  // useCandles(symbol) returns getCandlesForSymbol(symbol) from Zustand — never BTC or another symbol's data.
+  // All indicators below read this same `candles` array; when user switches pair, symbol changes and candles
+  // become the new symbol's data. Never use btcCandles or candlesBySymbol[other] here.
+
+  // DEBUG: Log and verify data is for current symbol (dev-only)
   useEffect(() => {
     if (process.env.NODE_ENV === 'development' && candles.length > 0) {
       const first3 = candles.slice(0, 3).map((c) => c.close.toFixed(2));
       const last3 = candles.slice(-3).map((c) => c.close.toFixed(2));
       console.log(`🎨 [TradingChart] symbol="${symbol}" count=${candles.length} FIRST=[${first3.join(',')}] LAST=[${last3.join(',')}]`);
+      // Plausible range check: ensure we're not showing wrong symbol's data (e.g. BTC prices when SOL selected)
+      const lastClose = candles[candles.length - 1]?.close ?? 0;
+      const ranges: Record<string, [number, number]> = {
+        BTCUSDT: [1000, 500_000],
+        SOLUSDT: [1, 10_000],
+        BNBUSDT: [10, 10_000],
+        XRPUSDT: [0.01, 100],
+      };
+      const [min, max] = ranges[symbol] ?? [0, Infinity];
+      if (lastClose < min || lastClose > max) {
+        console.error(`[TradingChart] DATA MISMATCH? symbol=${symbol} but lastClose=${lastClose} outside [${min},${max}]. Check that candles are for selected symbol only.`);
+      }
     }
   }, [symbol, candles]);
 
@@ -110,7 +129,7 @@ export default function TradingChart({
     } catch {
       return { trend: 'NEUTRAL', ema20: 0, ema50: 0 };
     }
-  }, [candles.length, candles[candles.length - 1]?.time, isLoading]);
+  }, [candles.length, candles[candles.length - 1]?.time, symbol, isLoading]);
 
   // Scalp Signal Indicator — current-candle only, closed candles only (no repainting)
   // Returns array of one item (like Phoenix) so we always have something to draw when Scalp is on
@@ -130,6 +149,7 @@ export default function TradingChart({
     candles.length,
     candles[candles.length - 2]?.time,
     candles[candles.length - 2]?.close,
+    symbol,
     isLoading,
   ]);
 
@@ -148,6 +168,7 @@ export default function TradingChart({
     candles.length,
     candles[candles.length - 1]?.time,
     candles[candles.length - 1]?.close,
+    symbol,
     isLoading,
   ]);
 
@@ -182,6 +203,7 @@ export default function TradingChart({
     candles.length,
     candles[candles.length - 1]?.time,
     candles[candles.length - 1]?.close,
+    symbol,
     isLoading,
   ]);
 
@@ -234,6 +256,7 @@ export default function TradingChart({
     candles[candles.length - 2]?.time,
     candles[candles.length - 2]?.close,
     candles[candles.length - 1]?.time,
+    symbol,
     isLoading,
     enabledIndicators,
   ]);
@@ -264,7 +287,7 @@ export default function TradingChart({
       });
     }
     return displayItems;
-  }, [trendScalpResult, candles.length, candles[candles.length - 2]?.time, enabledIndicators]);
+  }, [trendScalpResult, candles.length, candles[candles.length - 2]?.time, symbol, enabledIndicators]);
 
   // Expose indicator data to parent component (deferred to avoid setState-during-render)
   useEffect(() => {
@@ -275,49 +298,21 @@ export default function TradingChart({
     });
   }, [semaforPoints, semaforTrend, scalpSignals, trendMarker, onIndicatorDataUpdate]);
 
-  // Initialize chart - RECREATE when symbol changes to ensure clean state
+  // Initialize chart ONCE on mount. When symbol changes we only call setData() in the data effect — no dispose/recreate.
+  // This avoids "Object is disposed" and follows lightweight-charts pattern: one chart, setData(newSymbolData) on symbol change.
   useEffect(() => {
     if (!chartContainerRef.current) return;
-    
-    console.log(`🏗️ [Chart] Creating NEW chart instance for ${symbol}`);
-    
-    // CRITICAL FIX: Always clean up existing chart before creating new one
-    if (chartRef.current) {
-      try {
-        console.log(`🗑️ [Chart] Removing old chart instance for ${symbol}`);
-        
-        // Remove series first to clear their internal state
-        if (candleSeriesRef.current) {
-          try {
-            chartRef.current.removeSeries(candleSeriesRef.current);
-          } catch (e) {
-            console.warn('[Chart] Error removing candle series:', e);
-          }
-        }
-        if (volumeSeriesRef.current) {
-          try {
-            chartRef.current.removeSeries(volumeSeriesRef.current);
-          } catch (e) {
-            console.warn('[Chart] Error removing volume series:', e);
-          }
-        }
-        
-        // Then remove the chart
-        chartRef.current.remove();
-      } catch (e) {
-        console.error('[Chart] Error removing old chart:', e);
-      }
-      chartRef.current = null;
-      candleSeriesRef.current = null;
-      volumeSeriesRef.current = null;
-    }
-    
-    // NUCLEAR OPTION: Clear the entire DOM container to force TradingView to start fresh
-    if (chartContainerRef.current) {
-      chartContainerRef.current.innerHTML = '';
-    }
+    if (chartRef.current) return; // Already created (e.g. Strict Mode double-mount)
 
-    const chart = createChart(chartContainerRef.current, {
+    const container = chartContainerRef.current;
+    let mutationObserver: MutationObserver | null = null;
+    let observerTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    isCleaningUpRef.current = false;
+    console.log(`🏗️ [Chart] Creating chart instance (once per component)`);
+
+    // Single chart instance — symbol change is handled by setData() in the data effect, not by recreate
+    const chart = createChart(container, {
       layout: {
         background: { type: ColorType.Solid, color: '#1a1a1a' },
         textColor: '#d1d4dc',
@@ -326,8 +321,9 @@ export default function TradingChart({
         vertLines: { color: '#2a2a2a' },
         horzLines: { color: '#2a2a2a' },
       },
-      width: chartContainerRef.current.clientWidth,
-      height: chartContainerRef.current.clientHeight || 600,
+      width: container.clientWidth,
+      height: container.clientHeight || 600,
+      autoSize: true,
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
@@ -362,27 +358,22 @@ export default function TradingChart({
     volumeSeriesRef.current = volumeSeries;
 
     // Convert time labels to IST using MutationObserver
-    // lightweight-charts renders time labels in the DOM, so we intercept and convert them
-    if (chartContainerRef.current) {
-      const observer = new MutationObserver(() => {
-        // Find all time labels in the chart
-        const timeElements = chartContainerRef.current?.querySelectorAll('[class*="pane"] [class*="time"], [class*="pane"] text') || [];
+    if (container) {
+      mutationObserver = new MutationObserver(() => {
+        const el = chartContainerRef.current;
+        if (!el) return;
+        const timeElements = el.querySelectorAll('[class*="pane"] [class*="time"], [class*="pane"] text') || [];
         timeElements.forEach((el) => {
           const text = el.textContent?.trim() || '';
-          // Check if it's a time format (HH:MM or HH:MM:SS)
           const timeMatch = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
           if (timeMatch) {
-            // This is a time label - we need to convert it from UTC/local to IST
-            // But we don't have the original timestamp, so we'll use a different approach
-            // Instead, we'll rely on the Date prototype override
+            // Time label - could convert to IST here if needed
           }
         });
       });
-
-      // Start observing after a short delay to let the chart render
-      setTimeout(() => {
-        if (chartContainerRef.current) {
-          observer.observe(chartContainerRef.current, {
+      observerTimeoutId = setTimeout(() => {
+        if (chartContainerRef.current && mutationObserver) {
+          mutationObserver.observe(chartContainerRef.current, {
             childList: true,
             subtree: true,
             characterData: true,
@@ -392,7 +383,6 @@ export default function TradingChart({
     }
 
     // Pan & Zoom handlers
-    const container = chartContainerRef.current;
     let cleanupPanZoom: (() => void) | null = null;
 
     if (container) {
@@ -456,52 +446,74 @@ export default function TradingChart({
     }
 
     const handleResize = () => {
-      if (chartContainerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight || 600,
+      if (isCleaningUpRef.current) return;
+      const ch = chartRef.current;
+      const cont = chartContainerRef.current;
+      if (!cont || !ch) return;
+      try {
+        ch.applyOptions({
+          width: cont.clientWidth,
+          height: cont.clientHeight || 600,
         });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.toLowerCase().includes('disposed')) return;
+        console.warn('[Chart] Resize error:', e);
       }
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
+      isCleaningUpRef.current = true;
       window.removeEventListener('resize', handleResize);
       if (cleanupPanZoom) cleanupPanZoom();
-      if (chartRef.current) {
-        console.log(`[Chart] Cleaning up chart for ${symbol}`);
-        chartRef.current.remove();
-        chartRef.current = null;
-        candleSeriesRef.current = null;
-        volumeSeriesRef.current = null;
+      if (observerTimeoutId != null) clearTimeout(observerTimeoutId);
+      if (mutationObserver && chartContainerRef.current) {
+        mutationObserver.disconnect();
+      }
+      const ch = chartRef.current;
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      if (ch) {
+        try {
+          ch.remove();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!msg.toLowerCase().includes('disposed')) console.warn('[Chart] Cleanup remove error:', e);
+        }
       }
     };
-  }, [symbol]); // CRITICAL: Recreate chart when symbol changes
+  }, []); // Empty deps: create once on mount; cleanup only on unmount
 
   // Update candle size (barSpacing) when it changes
   useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.timeScale().applyOptions({
+    const ch = chartRef.current;
+    if (!ch) return;
+    try {
+      ch.timeScale().applyOptions({
         barSpacing: candleSize,
       });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.toLowerCase().includes('disposed')) console.warn('[Chart] Candle size error:', e);
     }
   }, [candleSize]);
 
-  // On symbol/interval change: clear chart immediately so no stale data from previous symbol is shown.
-  useEffect(() => {
+  // On symbol/interval change: clear chart BEFORE paint so library never shows stale symbol (useLayoutEffect per lightweight-charts React tips).
+  // Update prevSymbolRef/prevIntervalRef here so we only clear ONCE per change; otherwise we'd clear again on every re-render until data effect runs.
+  useLayoutEffect(() => {
     if (prevSymbolRef.current !== symbol || prevIntervalRef.current !== interval) {
       console.log(`[Chart] Symbol/interval changed to ${symbol}/${interval}`);
       
-      // DON'T update prevSymbolRef here - let the data effect handle it!
-      // This ensures isSymbolChange detection works correctly
+      prevSymbolRef.current = symbol;
+      prevIntervalRef.current = interval;
       prevCandlesLenRef.current = 0;
-      chartDataSymbolRef.current = null; // CRITICAL: Clear this to prevent stale data guard
+      chartDataSymbolRef.current = null;
       userInteractedRef.current = false;
-      // Loading state is now managed by useCandles hook
       
       try {
         if (candleSeriesRef.current && volumeSeriesRef.current) {
-          console.log('[Chart] Clearing all series data');
           candleSeriesRef.current.setData([]);
           volumeSeriesRef.current.setData([]);
         }
@@ -514,8 +526,8 @@ export default function TradingChart({
     }
   }, [symbol, interval]);
 
-  // Update chart data when candles change (from useCandles; candles are for current symbol after clear on symbol change).
-  useEffect(() => {
+  // Update chart data BEFORE paint so no flicker/wrong scale (useLayoutEffect per lightweight-charts React tips).
+  useLayoutEffect(() => {
     console.log(`[Chart Data Effect] Triggered: symbol=${symbol}, candles=${candles.length}, seriesExists=${!!candleSeriesRef.current}`);
     
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
@@ -533,6 +545,22 @@ export default function TradingChart({
     if (chartDataSymbolRef.current !== null && symbol !== chartDataSymbolRef.current) {
       console.warn(`[Chart] BLOCKING stale data: chart has ${chartDataSymbolRef.current} but received ${symbol}`);
       return;
+    }
+
+    // Per HLD: never apply another symbol's candles. If price range doesn't match current symbol, skip (handles WS/store race).
+    const expectedRanges: Record<string, [number, number]> = {
+      BTCUSDT: [1000, 500_000],
+      SOLUSDT: [1, 10_000],
+      BNBUSDT: [10, 10_000],
+      XRPUSDT: [0.01, 100],
+    };
+    const range = expectedRanges[symbol];
+    if (range && candles.length > 0) {
+      const lastClose = candles[candles.length - 1]?.close ?? 0;
+      if (lastClose < range[0] || lastClose > range[1]) {
+        console.warn(`[Chart] SKIP setData: candles look like wrong symbol (${symbol} expects ${range[0]}-${range[1]}, got close=${lastClose})`);
+        return;
+      }
     }
 
     if (process.env.NODE_ENV === 'development' && candles.length > 0) {
@@ -608,7 +636,6 @@ export default function TradingChart({
         }
         candleSeriesRef.current.setData(candlestickData);
         volumeSeriesRef.current.setData(volumeData);
-        console.log(`✅ [Chart] Successfully called setData for ${symbol} (${candlestickData.length} candles)`);
         chartDataSymbolRef.current = symbol;
         const lastCandle = candles[candles.length - 1];
         if (lastCandle) setCurrentPrice(lastCandle.close);
@@ -616,35 +643,25 @@ export default function TradingChart({
         prevSymbolRef.current = symbol;
         prevIntervalRef.current = interval;
 
-        if (!userInteractedRef.current || isSymbolChange) {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              setTimeout(() => {
-                try {
-                  if (chartRef.current && candlestickData.length > 0) {
-                    // Set zoom to show a focused window of candles for scalping.
-                    // With current barSpacing, ~80 candles gives the desired default view.
-                    const visibleCandles = 80;
-                    const lastTime = candlestickData[candlestickData.length - 1].time as number;
-                    const firstVisibleIndex = Math.max(0, candlestickData.length - visibleCandles);
-                    const firstTime = candlestickData[firstVisibleIndex].time as number;
-                    
-                    chartRef.current.timeScale().setVisibleRange({
-                      from: firstTime as Time,
-                      to: lastTime as Time,
-                    });
-                    
-                    if (chartContainerRef.current && chartRef.current)
-                      chartRef.current.applyOptions({
-                        width: chartContainerRef.current.clientWidth,
-                        height: chartContainerRef.current.clientHeight || 600,
-                      });
-                  }
-                } catch {}
-              }, 150);
-            });
+        // Update time scale and size SYNCHRONOUSLY before paint (no rAF/setTimeout) so chart renders correctly when switching symbol.
+        const ch = chartRef.current;
+        const cont = chartContainerRef.current;
+        if (ch && cont && candlestickData.length > 0) {
+          if (!userInteractedRef.current || isSymbolChange) {
+            const visibleCandles = 80;
+            const lastTime = candlestickData[candlestickData.length - 1].time as number;
+            const firstVisibleIndex = Math.max(0, candlestickData.length - visibleCandles);
+            const firstTime = candlestickData[firstVisibleIndex].time as number;
+            ch.timeScale().setVisibleRange({ from: firstTime as Time, to: lastTime as Time });
+          }
+          // When user has already interacted, do not call fitContent() — it zooms out and overrides their view.
+          ch.applyOptions({
+            width: cont.clientWidth,
+            height: cont.clientHeight || 600,
           });
         }
+
+        console.log(`✅ [Chart] setData for ${symbol} (${candlestickData.length} candles)`);
       } catch (error) {
         console.error('[Chart] Error setting chart data:', error);
       }
@@ -675,21 +692,21 @@ export default function TradingChart({
 
   const isEnabled = (id: string) => enabledIndicators.has(id);
 
-  // Tab visibility — refresh chart on return
+  // Tab visibility — resize chart only when returning to tab; do not change zoom (fitContent would zoom out).
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && chartRef.current && chartContainerRef.current) {
-        try {
-          chartRef.current.applyOptions({
-            width: chartContainerRef.current.clientWidth,
-            height: chartContainerRef.current.clientHeight || 600,
-          });
-          setTimeout(() => {
-            if (chartRef.current && candles.length > 0) {
-              chartRef.current.timeScale().fitContent();
-            }
-          }, 100);
-        } catch {}
+      if (document.visibilityState !== 'visible' || isCleaningUpRef.current) return;
+      const ch = chartRef.current;
+      const cont = chartContainerRef.current;
+      if (!ch || !cont) return;
+      try {
+        ch.applyOptions({
+          width: cont.clientWidth,
+          height: cont.clientHeight || 600,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.toLowerCase().includes('disposed')) console.warn('[Chart] Visibility resize error:', e);
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);

@@ -19,8 +19,8 @@ try:
 except ImportError:
     httpx = None
 
-# Expected config (1m only in store after recent backend change)
-EXPECTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+# Expected config: 4 symbols (1m only in store)
+EXPECTED_SYMBOLS = ["BTCUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 INTERVAL_1M_SEC = 60
 INTERVAL_1M_MS = 60_000
 
@@ -115,6 +115,29 @@ def run_tests(base_url: str, timeout: float = 15.0):
             errors.append("streaming/status: no 1m candle count > 0")
     except Exception as e:
         errors.append("GET /streaming/status failed: %s" % e)
+
+    # 5) Chart endpoint /candles/{symbol}/1m returns unique data per symbol (same as TradingChart uses)
+    # Ensures when user switches symbol, frontend gets different candles — not same chart for every symbol.
+    try:
+        last_closes = {}
+        for symbol in EXPECTED_SYMBOLS:
+            r = httpx.get(f"{base}/candles/{symbol}/1m", params={"limit": 5}, timeout=timeout)
+            r.raise_for_status()
+            data = r.json()
+            candles = data.get("candles") or []
+            if not candles:
+                errors.append("Chart candles %s: no candles returned (chart would show empty)" % symbol)
+            else:
+                last_closes[symbol] = candles[-1].get("close")
+        if len(last_closes) >= 2:
+            values = list(last_closes.values())
+            if len(set(values)) == 1:
+                errors.append(
+                    "Chart candles: all symbols have same last close (same chart bug). "
+                    "last_closes=%s. TradingChart must receive unique data per symbol." % last_closes
+                )
+    except Exception as e:
+        errors.append("GET /candles/{symbol}/1m (chart endpoint) failed: %s" % e)
 
     return len(errors) == 0, errors
 

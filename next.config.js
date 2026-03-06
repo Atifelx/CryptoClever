@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const path = require('path');
+
 const nextConfig = {
   // Enable standalone output for Docker deployment
   output: 'standalone',
@@ -70,6 +72,13 @@ const nextConfig = {
     
     // PERMANENT FIX: Prevent _error.js 500 errors during HMR
     if (dev) {
+      // Use production build of lightweight-charts in dev to avoid "Object is disposed" errors
+      // (development build throws when chart paints after remove(); production does not).
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'lightweight-charts': path.resolve(__dirname, 'node_modules/lightweight-charts/dist/lightweight-charts.production.mjs'),
+      };
+
       config.watchOptions = {
         poll: 1000,
         aggregateTimeout: 300,
