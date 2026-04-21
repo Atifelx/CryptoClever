@@ -105,7 +105,7 @@ function computeATR(candles: Candle[], period: number): number {
 function getAdaptiveDeviation(candles: Candle[], timeframe?: string): number {
   if (candles.length < 10) return 0.5;
 
-  const lookback = Math.min(50, candles.length - 1);
+  const lookback = Math.min(200, candles.length - 1);
   const recent = candles.slice(-lookback - 1);
   let totalTR = 0;
 
@@ -234,8 +234,9 @@ function assignStrengths(pivots: ZigZagPivot[]): Map<number, 1 | 2 | 3> {
   }
 
   const sorted = swings.map(s => s.size).sort((a, b) => a - b);
-  const p50 = sorted[Math.floor(sorted.length * 0.5)] || 0;
-  const p80 = sorted[Math.floor(sorted.length * 0.8)] || 0;
+  // Stable percentiles over a larger lookback (implicit as we pass more pivots)
+  const p50 = sorted[Math.floor(sorted.length * 0.55)] || 0;
+  const p80 = sorted[Math.floor(sorted.length * 0.85)] || 0;
 
   swings.forEach(({ index, size }) => {
     if (size >= p80) strengths.set(index, 3);
@@ -292,8 +293,8 @@ function detectLivePatterns(candles: Candle[]): LiveSignal[] {
   const emaDiff = ema50 > 0 ? ((ema20 - ema50) / ema50) * 100 : 0;
 
   let trend: 'BULL' | 'BEAR' | 'NEUTRAL';
-  if (emaDiff > 0.035) trend = 'BULL';
-  else if (emaDiff < -0.035) trend = 'BEAR';
+  if (emaDiff > 0.05) trend = 'BULL';
+  else if (emaDiff < -0.05) trend = 'BEAR';
   else trend = 'NEUTRAL';
 
   // ═══ ANALYZE ONLY CLOSED CANDLES ═══
@@ -601,8 +602,8 @@ export function getSemaforTrend(candles: Candle[]): SemaforTrend {
   const emaDiff = ema50 > 0 ? ((ema20 - ema50) / ema50) * 100 : 0;
 
   let trend: 'BULL' | 'BEAR' | 'NEUTRAL';
-  if (emaDiff > 0.035) trend = 'BULL';
-  else if (emaDiff < -0.035) trend = 'BEAR';
+  if (emaDiff > 0.05) trend = 'BULL';
+  else if (emaDiff < -0.05) trend = 'BEAR';
   else trend = 'NEUTRAL';
 
   return { trend, ema20, ema50 };
