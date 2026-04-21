@@ -123,7 +123,7 @@ function getAdaptiveDeviation(candles: Candle[], timeframe?: string): number {
   const multipliers: Record<string, number> = {
     '1m': 3.0,
     '5m': 3.5,
-    '15m': 3.2,
+    '15m': 2.2,
     '1h': 4.5,
     '4h': 5.5,
     '1d': 6.5,
@@ -337,9 +337,9 @@ function detectLivePatterns(candles: Candle[]): LiveSignal[] {
     if (p1Bearish && isBullish &&
         c.open <= p1.close && c.close >= p1.open &&
         body > p1Body * 1.0 &&     // Must fully engulf
-        body > atr * 0.4 &&         // Significant body size
+        body > atr * 0.3 &&         // Loosened body size
         priorBearish) {              // After a bearish move
-      const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.8 ? 2 : 1;
+      const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.7 ? 2 : 1;
       // Allow if not against trend OR if it's a very strong (Strength 3) reversal
       if (trend !== 'BEAR' || str === 3) {
         signals.push({
@@ -366,6 +366,17 @@ function detectLivePatterns(candles: Candle[]): LiveSignal[] {
       }
     }
 
+    // 2.5 PIN BAR (Bullish rejection)
+    if (lowerWick > body * 2.5 && upperWick < body * 0.6 && range > atr * 0.45) {
+      if (trend !== 'BEAR') {
+        signals.push({
+          time: c.time, price: c.low, type: 'low',
+          direction: 'UP', strength: lowerWick > body * 4 ? 3 : 2,
+          pattern: 'Pin Bar (Bullish)', isLive: true,
+        });
+      }
+    }
+
     // 3. MORNING STAR (3-candle bullish reversal)
     if (idx >= 5) {
       const p2Bearish = p2.close < p2.open;
@@ -388,9 +399,9 @@ function detectLivePatterns(candles: Candle[]): LiveSignal[] {
     if (p1Bullish && isBearish &&
         c.open >= p1.close && c.close <= p1.open &&
         body > p1Body * 1.0 &&
-        body > atr * 0.4 &&
+        body > atr * 0.3 &&          // Loosened body size
         priorBullish) {
-      const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.8 ? 2 : 1;
+      const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.7 ? 2 : 1;
       if (trend !== 'BULL' || str === 3) {
         signals.push({
           time: c.time, price: c.high, type: 'high',
@@ -412,6 +423,17 @@ function detectLivePatterns(candles: Candle[]): LiveSignal[] {
           time: c.time, price: c.high, type: 'high',
           direction: 'DOWN', strength: str,
           pattern: 'Shooting Star', isLive: true,
+        });
+      }
+    }
+
+    // 5.5 PIN BAR (Bearish rejection)
+    if (upperWick > body * 2.5 && lowerWick < body * 0.6 && range > atr * 0.45) {
+      if (trend !== 'BULL') {
+        signals.push({
+          time: c.time, price: c.high, type: 'high',
+          direction: 'DOWN', strength: upperWick > body * 4 ? 3 : 2,
+          pattern: 'Pin Bar (Bearish)', isLive: true,
         });
       }
     }
@@ -541,10 +563,10 @@ export function calculateSemafor(
       // Cooldown: skip if a ZigZag pivot of the same type exists at this time
       if (pivotTimes.has(sig.time)) continue;
 
-      // Also skip if there's a pivot within ±2 candle times
+      // Also skip if there's a pivot within ±1 candle time (was ±2)
       const sigIdx = data.findIndex(c => c.time === sig.time);
       let tooCloseToZigZag = false;
-      for (let i = Math.max(0, sigIdx - 2); i <= Math.min(data.length - 1, sigIdx + 2); i++) {
+      for (let i = Math.max(0, sigIdx - 1); i <= Math.min(data.length - 1, sigIdx + 1); i++) {
         if (pivotTimes.has(data[i].time)) {
           // Check if it's the same type (high/low)
           const nearbyPivot = pivots.find(p => p.time === data[i].time);
