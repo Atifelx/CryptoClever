@@ -123,7 +123,7 @@ function getAdaptiveDeviation(candles: Candle[], timeframe?: string): number {
   const multipliers: Record<string, number> = {
     '1m': 3.0,
     '5m': 3.5,
-    '15m': 3.8,
+    '15m': 3.2,
     '1h': 4.5,
     '4h': 5.5,
     '1d': 6.5,
@@ -333,108 +333,106 @@ function detectLivePatterns(candles: Candle[]): LiveSignal[] {
     const priorBullish = priorBullCount >= 2 && p1.close > p2.close;
 
     // ──── BULLISH PATTERNS ────
-    // Only signal BUY in uptrend or neutral (NEVER in confirmed downtrend)
-    if (trend !== 'BEAR') {
-
-      // 1. BULLISH ENGULFING
-      // Previous red, current green, current body fully covers previous body
-      if (p1Bearish && isBullish &&
-          c.open <= p1.close && c.close >= p1.open &&
-          body > p1Body * 1.0 &&     // Must fully engulf
-          body > atr * 0.4 &&         // Significant body size
-          priorBearish) {              // After a bearish move
-        const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.8 ? 2 : 1;
+    // 1. BULLISH ENGULFING
+    if (p1Bearish && isBullish &&
+        c.open <= p1.close && c.close >= p1.open &&
+        body > p1Body * 1.0 &&     // Must fully engulf
+        body > atr * 0.4 &&         // Significant body size
+        priorBearish) {              // After a bearish move
+      const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.8 ? 2 : 1;
+      // Allow if not against trend OR if it's a very strong (Strength 3) reversal
+      if (trend !== 'BEAR' || str === 3) {
         signals.push({
           time: c.time, price: c.low, type: 'low',
           direction: 'UP', strength: str,
           pattern: 'Bullish Engulfing', isLive: true,
         });
       }
+    }
 
-      // 2. HAMMER (bullish reversal after downtrend)
-      // Small body at top, long lower wick, short upper wick
-      if (priorBearish &&
-          lowerWick > body * 2.0 &&    // Lower wick ≥ 2x body
-          upperWick < body * 0.5 &&    // Upper wick < 0.5x body
-          body > 0 &&                  // Must have some body
-          range > atr * 0.5) {         // Significant range
-        const str: 1|2|3 = lowerWick > body * 4 ? 3 : lowerWick > body * 2.5 ? 2 : 1;
+    // 2. HAMMER
+    if (priorBearish &&
+        lowerWick > body * 2.0 &&    // Lower wick ≥ 2x body
+        upperWick < body * 0.5 &&    // Upper wick < 0.5x body
+        body > 0 &&                  // Must have some body
+        range > atr * 0.5) {         // Significant range
+      const str: 1|2|3 = lowerWick > body * 4 ? 3 : lowerWick > body * 2.5 ? 2 : 1;
+      if (trend !== 'BEAR' || str === 3) {
         signals.push({
           time: c.time, price: c.low, type: 'low',
           direction: 'UP', strength: str,
           pattern: 'Hammer', isLive: true,
         });
       }
+    }
 
-      // 3. MORNING STAR (3-candle bullish reversal)
-      // p2 = big red, p1 = small body (star), c = big green closing above p2 midpoint
-      if (idx >= 5) {
-        const p2Bearish = p2.close < p2.open;
-        const p1Small = p1Body < p2Body * 0.3 && p1Body < body * 0.3;
-        const p2Mid = (p2.open + p2.close) / 2;
+    // 3. MORNING STAR (3-candle bullish reversal)
+    if (idx >= 5) {
+      const p2Bearish = p2.close < p2.open;
+      const p1Small = p1Body < p2Body * 0.3 && p1Body < body * 0.3;
+      const p2Mid = (p2.open + p2.close) / 2;
 
-        if (p2Bearish && p1Small && isBullish && c.close > p2Mid &&
-            body > atr * 0.5 && p2Body > atr * 0.5) {
-          signals.push({
-            time: c.time, price: c.low, type: 'low',
-            direction: 'UP', strength: 3,
-            pattern: 'Morning Star', isLive: true,
-          });
-        }
+      if (p2Bearish && p1Small && isBullish && c.close > p2Mid &&
+          body > atr * 0.5 && p2Body > atr * 0.5) {
+        // Morning Star is always strength 3, allow even if against trend
+        signals.push({
+          time: c.time, price: c.low, type: 'low',
+          direction: 'UP', strength: 3,
+          pattern: 'Morning Star', isLive: true,
+        });
       }
     }
 
     // ──── BEARISH PATTERNS ────
-    // Only signal SELL in downtrend or neutral (NEVER in confirmed uptrend)
-    if (trend !== 'BULL') {
-
-      // 4. BEARISH ENGULFING
-      // Previous green, current red, current body fully covers previous body
-      if (p1Bullish && isBearish &&
-          c.open >= p1.close && c.close <= p1.open &&
-          body > p1Body * 1.0 &&
-          body > atr * 0.4 &&
-          priorBullish) {
-        const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.8 ? 2 : 1;
+    // 4. BEARISH ENGULFING
+    if (p1Bullish && isBearish &&
+        c.open >= p1.close && c.close <= p1.open &&
+        body > p1Body * 1.0 &&
+        body > atr * 0.4 &&
+        priorBullish) {
+      const str: 1|2|3 = body > atr * 1.5 ? 3 : body > atr * 0.8 ? 2 : 1;
+      if (trend !== 'BULL' || str === 3) {
         signals.push({
           time: c.time, price: c.high, type: 'high',
           direction: 'DOWN', strength: str,
           pattern: 'Bearish Engulfing', isLive: true,
         });
       }
+    }
 
-      // 5. SHOOTING STAR (bearish reversal after uptrend)
-      // Small body at bottom, long upper wick, short lower wick
-      if (priorBullish &&
-          upperWick > body * 2.0 &&
-          lowerWick < body * 0.5 &&
-          body > 0 &&
-          range > atr * 0.5) {
-        const str: 1|2|3 = upperWick > body * 4 ? 3 : upperWick > body * 2.5 ? 2 : 1;
+    // 5. SHOOTING STAR
+    if (priorBullish &&
+        upperWick > body * 2.0 &&
+        lowerWick < body * 0.5 &&
+        body > 0 &&
+        range > atr * 0.5) {
+      const str: 1|2|3 = upperWick > body * 4 ? 3 : upperWick > body * 2.5 ? 2 : 1;
+      if (trend !== 'BULL' || str === 3) {
         signals.push({
           time: c.time, price: c.high, type: 'high',
           direction: 'DOWN', strength: str,
           pattern: 'Shooting Star', isLive: true,
         });
       }
+    }
 
-      // 6. EVENING STAR (3-candle bearish reversal)
-      // p2 = big green, p1 = small body (star), c = big red closing below p2 midpoint
-      if (idx >= 5) {
-        const p2Bullish = p2.close > p2.open;
-        const p1Small = p1Body < p2Body * 0.3 && p1Body < body * 0.3;
-        const p2Mid = (p2.open + p2.close) / 2;
+    // 6. EVENING STAR (3-candle bearish reversal)
+    if (idx >= 5) {
+      const p2Bullish = p2.close > p2.open;
+      const p1Small = p1Body < p2Body * 0.3 && p1Body < body * 0.3;
+      const p2Mid = (p2.open + p2.close) / 2;
 
-        if (p2Bullish && p1Small && isBearish && c.close < p2Mid &&
-            body > atr * 0.5 && p2Body > atr * 0.5) {
-          signals.push({
-            time: c.time, price: c.high, type: 'high',
-            direction: 'DOWN', strength: 3,
-            pattern: 'Evening Star', isLive: true,
-          });
-        }
+      if (p2Bullish && p1Small && isBearish && c.close < p2Mid &&
+          body > atr * 0.5 && p2Body > atr * 0.5) {
+        // Evening Star is always strength 3, allow even if against trend
+        signals.push({
+          time: c.time, price: c.high, type: 'high',
+          direction: 'DOWN', strength: 3,
+          pattern: 'Evening Star', isLive: true,
+        });
       }
     }
+
   }
 
   // ═══ DEDUPLICATION ═══
