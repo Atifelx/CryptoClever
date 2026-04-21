@@ -123,7 +123,7 @@ function getAdaptiveDeviation(candles: Candle[], timeframe?: string): number {
   const multipliers: Record<string, number> = {
     '1m': 3.0,
     '5m': 3.5,
-    '15m': 4.0,
+    '15m': 3.8,
     '1h': 4.5,
     '4h': 5.5,
     '1d': 6.5,
@@ -201,12 +201,8 @@ function runZigZag(candles: Candle[], devPercent: number): ZigZagPivot[] {
     }
   }
 
-  // Add the last unconfirmed extreme (the "live" pivot)
-  if (direction === 1) {
-    pivots.push({ index: swHi, time: candles[swHi].time, price: swHiP, type: 'high' });
-  } else if (direction === -1) {
-    pivots.push({ index: swLo, time: candles[swLo].time, price: swLoP, type: 'low' });
-  }
+  // REMOVED for zero repainting: don't add the last unconfirmed extreme.
+  // The logic now only returns pivots that have been officially confirmed by a reversal.
 
   return pivots;
 }
@@ -296,8 +292,8 @@ function detectLivePatterns(candles: Candle[]): LiveSignal[] {
   const emaDiff = ema50 > 0 ? ((ema20 - ema50) / ema50) * 100 : 0;
 
   let trend: 'BULL' | 'BEAR' | 'NEUTRAL';
-  if (emaDiff > 0.02) trend = 'BULL';
-  else if (emaDiff < -0.02) trend = 'BEAR';
+  if (emaDiff > 0.035) trend = 'BULL';
+  else if (emaDiff < -0.035) trend = 'BEAR';
   else trend = 'NEUTRAL';
 
   // ═══ ANALYZE ONLY CLOSED CANDLES ═══
@@ -321,6 +317,9 @@ function detectLivePatterns(candles: Candle[]): LiveSignal[] {
     const isBearish = c.close < c.open;
     const p1Bullish = p1.close > p1.open;
     const p1Bearish = p1.close < p1.open;
+
+    // Volatility check: signal candle range should be at least 0.6x ATR
+    if (range < atr * 0.6) continue;
 
     const upperWick = c.high - Math.max(c.open, c.close);
     const lowerWick = Math.min(c.open, c.close) - c.low;
@@ -602,8 +601,8 @@ export function getSemaforTrend(candles: Candle[]): SemaforTrend {
   const emaDiff = ema50 > 0 ? ((ema20 - ema50) / ema50) * 100 : 0;
 
   let trend: 'BULL' | 'BEAR' | 'NEUTRAL';
-  if (emaDiff > 0.02) trend = 'BULL';
-  else if (emaDiff < -0.02) trend = 'BEAR';
+  if (emaDiff > 0.035) trend = 'BULL';
+  else if (emaDiff < -0.035) trend = 'BEAR';
   else trend = 'NEUTRAL';
 
   return { trend, ema20, ema50 };

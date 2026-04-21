@@ -66,8 +66,7 @@ async def test_binance():
     import httpx
     from app.config import HTTP_PROXY, HTTPS_PROXY
     
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": "BTCUSDT", "interval": "1m", "limit": 5}
+    params = {"symbol": "BTCUSDT", "interval": "15m", "limit": 5}
     
     # Configure proxy if available
     proxies = {}
@@ -126,7 +125,7 @@ async def debug_verify_unique_data():
     """Check if each symbol has unique data (bug = all same last_close)."""
     results = {}
     for symbol in SYMBOLS:
-        candles = await get_candles(symbol, "1m", 5)
+        candles = await get_candles(symbol, "15m", 5)
         results[symbol] = {
             "count": len(candles),
             "last_close": candles[-1].get("close") if candles else None,
@@ -223,7 +222,7 @@ TEST_CANDLES_HTML = """<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Test History + Live (1m)</title>
+  <title>Test History + Live (15m)</title>
   <style>
     body { font-family: system-ui; background: #0f0f0f; color: #e0e0e0; padding: 20px; max-width: 900px; }
     h1 { font-size: 1.25rem; }
@@ -239,16 +238,16 @@ TEST_CANDLES_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <h1>Test History + Live (1m) – URLs this app uses</h1>
+  <h1>Test History + Live (15m) – URLs this app uses</h1>
 
   <section>
     <h2>Existing URLs (our app)</h2>
-    <p><strong>History (REST, 1m, 12h = 720 candles):</strong></p>
-    <p class="url"><code id="url-history">/api/historical/BTCUSDT?interval=1m&hours=12</code></p>
-    <p><strong>Live (WebSocket, 1m):</strong></p>
+    <p><strong>History (REST, 15m, 12h = 48 candles):</strong></p>
+    <p class="url"><code id="url-history">/api/historical/BTCUSDT?interval=15m&hours=12</code></p>
+    <p><strong>Live (WebSocket, 15m):</strong></p>
     <p class="url"><code id="url-ws">/ws/BTCUSDT</code></p>
-    <p><strong>Binance URL (backend subscribes to, BTC 1m only):</strong></p>
-    <p class="url"><code>wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m</code></p>
+    <p><strong>Binance URL (backend subscribes to, BTC 15m only):</strong></p>
+    <p class="url"><code>wss://stream.binance.com:9443/stream?streams=btcusdt@kline_15m</code></p>
   </section>
 
   <section>
@@ -326,23 +325,23 @@ TEST_CANDLES_HTML = """<!DOCTYPE html>
 
 @app.get("/test/candles/urls")
 async def test_candles_urls(request: Request):
-    """Return JSON of the history and live URLs the app uses (1m). For scripts or browser."""
+    """Return JSON of the history and live URLs the app uses (15m). For scripts or browser."""
     base = str(request.base_url).rstrip("/")
     base_ws = base.replace("http://", "ws://").replace("https://", "wss://")
     return {
         "history_rest": {
-            "description": "History (1m, 12h = 720 candles) – same as app",
-            "url_template": base + "/api/historical/{symbol}?interval=1m&hours=12",
-            "example": base + "/api/historical/BTCUSDT?interval=1m&hours=12",
+            "description": "History (15m, 12h = 48 candles) – same as app",
+            "url_template": base + "/api/historical/{symbol}?interval=15m&hours=12",
+            "example": base + "/api/historical/BTCUSDT?interval=15m&hours=12",
         },
         "live_websocket": {
-            "description": "Live (1m) – same as app",
+            "description": "Live (15m) – same as app",
             "url_template": base_ws + "/ws/{symbol}",
             "example": base_ws + "/ws/BTCUSDT",
         },
         "binance_ws_backend_subscribes": {
-            "description": "Binance URL backend uses (BTC 1m only)",
-            "url": "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_1m",
+            "description": "Binance URL backend uses (BTC 15m only)",
+            "url": "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_15m",
         },
         "symbols": list(SYMBOLS),
     }
@@ -350,7 +349,7 @@ async def test_candles_urls(request: Request):
 
 @app.get("/test/candles", response_class=HTMLResponse)
 async def test_candles_page():
-    """Single endpoint to test history + live in browser. Uses same URLs as the app (1m)."""
+    """Single endpoint to test history + live in browser. Uses same URLs as the app (15m)."""
     return TEST_CANDLES_HTML
 
 
@@ -359,8 +358,8 @@ _HISTORICAL_INTERVAL_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m
 
 
 @app.get("/api/historical/{symbol}")
-async def api_historical(symbol: str, interval: str = "1m", hours: int = 12):
-    """Proposal API: historical candles (time in ms, is_closed true). Any symbol in SYMBOLS, 1m."""
+async def api_historical(symbol: str, interval: str = "15m", hours: int = 12):
+    """Proposal API: historical candles (time in ms, is_closed true). Any symbol in SYMBOLS, 15m."""
     symbol = normalize_symbol(symbol)
     interval = normalize_interval(interval)
 
@@ -419,7 +418,7 @@ async def streaming_status():
 
 
 @app.get("/validate/candles")
-async def validate_candles(interval: str = "1m"):
+async def validate_candles(interval: str = "15m"):
     """Programmatic validation: compare last close across symbols. Returns PASS if data differs per symbol, FAIL if same for all."""
     interval = interval.lower() if interval.upper() != "1D" else "1d"
     last_closes: dict[str, float] = {}
@@ -453,7 +452,7 @@ async def validate_candles(interval: str = "1m"):
 @app.get("/verify/status")
 async def verify_status():
     """JSON check: server up and Binance bootstrap has candle data. Use for curl or /api/backend/verify/status."""
-    data = await get_candles("BTCUSDT", "1m", limit=1)
+    data = await get_candles("BTCUSDT", "15m", limit=1)
     if data and len(data) > 0:
         return {"ok": True, "message": "Backend and Binance bootstrap OK"}
     return {"ok": False, "message": "Bootstrap not ready or no candle data"}
@@ -600,7 +599,7 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Verify: Binance 1000 candles</title>
+  <title>Verify: Binance 1000 candles (15m)</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 16px; }
@@ -624,7 +623,7 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
 <body>
   <h1>Verify: Binance 1000 candles</h1>
   <p class="sub">Table of candle counts per symbol × interval (target 1000). Auto-refreshes every 4s.</p>
-  <p id="summary" class="summary">All symbols (1m) have 1000 candles: —</p>
+  <p id="summary" class="summary">All symbols (15m) have 1000 candles: —</p>
   <div id="serverStatus" class="status-box err">Checking backend…</div>
   <p class="sub">Last fetch: <span id="lastFetch">—</span></p>
   <table>
@@ -836,7 +835,7 @@ INSPECT_WS_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <h1>Live WebSocket candles</h1>
-  <p class="sub">Subscribes to BTCUSDT 1m; shows the last 30 candle updates from the backend WebSocket. If no new rows appear, the Binance stream or backend may have stopped.</p>
+  <p class="sub">Subscribes to BTCUSDT 15m; shows the last 30 candle updates from the backend WebSocket. If no new rows appear, the Binance stream or backend may have stopped.</p>
   <div id="connStatus" class="status-box disconnected">Connecting…</div>
   <p class="sub">Received: <span id="count">0</span> messages</p>
   <div style="max-height: 70vh; overflow: auto;">
@@ -877,8 +876,8 @@ INSPECT_WS_HTML = """<!DOCTYPE html>
       const ws = new WebSocket(wsUrl);
       ws.onopen = function() {
         connStatus.className = 'status-box connected';
-        connStatus.innerHTML = 'Connected. Subscribed to BTCUSDT 1m. Waiting for live candle updates…';
-        ws.send(JSON.stringify({ symbol: 'BTCUSDT', interval: '1m' }));
+        connStatus.innerHTML = 'Connected. Subscribed to BTCUSDT 15m. Waiting for live candle updates…';
+        ws.send(JSON.stringify({ symbol: 'BTCUSDT', interval: '15m' }));
       };
       ws.onmessage = function(ev) {
         try {
@@ -933,7 +932,7 @@ VERIFY_LIVE_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <h1>Verify: Live candle appends (Binance to backend store)</h1>
-  <p class="sub">Subscribes to all symbols (1m). New rows appear as Binance sends kline updates and the backend appends to memory/Redis and broadcasts over WebSocket.</p>
+  <p class="sub">Subscribes to all symbols (15m). New rows appear as Binance sends kline updates and the backend appends to memory/Redis and broadcasts over WebSocket.</p>
   <div id="connStatus" class="status-box disconnected">Connecting…</div>
   <p class="sub">Received: <span id="count">0</span> messages</p>
   <div style="max-height: 70vh; overflow: auto;">
@@ -974,8 +973,8 @@ VERIFY_LIVE_HTML = """<!DOCTYPE html>
       const ws = new WebSocket(wsUrl);
       ws.onopen = function() {
         connStatus.className = 'status-box connected';
-        connStatus.textContent = 'Connected. Subscribed to ' + SYMBOLS.length + ' symbols (1m). Waiting for live candle updates…';
-        ws.send(JSON.stringify({ subscriptions: SYMBOLS.map(function(s) { return { symbol: s, interval: '1m' }; }) }));
+        connStatus.textContent = 'Connected. Subscribed to ' + SYMBOLS.length + ' symbols (15m). Waiting for live candle updates…';
+        ws.send(JSON.stringify({ subscriptions: SYMBOLS.map(function(s) { return { symbol: s, interval: '15m' }; }) }));
       };
       ws.onmessage = function(ev) {
         try {
@@ -1022,7 +1021,7 @@ async def websocket_proposal(websocket: WebSocket, symbol: str):
         return
     
     try:
-        candles = await get_candles(symbol, "1m", limit=720)
+        candles = await get_candles(symbol, "15m", limit=720)
         data = [
             {
                 "time": c["time"] * 1000,
@@ -1036,7 +1035,7 @@ async def websocket_proposal(websocket: WebSocket, symbol: str):
             for c in candles
         ]
         await websocket.send_json({"type": "historical", "symbol": symbol, "data": data})
-        await ws_broadcast.subscribe_proposal(websocket, symbol, "1m")
+        await ws_broadcast.subscribe_proposal(websocket, symbol, "15m")
         logger.info("Proposal WS client connected to /ws/%s, sent %d historical candles", symbol, len(data))
         while True:
             await websocket.receive_text()
@@ -1056,7 +1055,7 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
     """
     symbol = normalize_symbol(symbol)
     await websocket.accept()
-    await ws_broadcast.subscribe(websocket, symbol, "1m")
+    await ws_broadcast.subscribe(websocket, symbol, "15m")
     logger.info("Client connected to /ws/candles/%s (shared feed)", symbol)
     try:
         while True:

@@ -5,16 +5,17 @@ from dotenv import load_dotenv
 # Load .env from backend directory so DATABASE_URL etc. can override defaults
 load_dotenv()
 
-# BTC + SOL, BNB, XRP (1m)
+# BTC + ETH, SOL, BNB, XRP (15m)
 SYMBOLS = [
     "BTCUSDT",
+    "ETHUSDT",
     "SOLUSDT",
     "BNBUSDT",
     "XRPUSDT",
 ]
 
-# Only 1m interval for minimal server load
-INTERVALS = ["1m"]
+# Only 15m interval for minimal server load
+INTERVALS = ["15m"]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # Set to "1" or "true" to use in-memory store instead of Redis (no Redis needed for local testing)

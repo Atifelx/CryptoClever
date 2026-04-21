@@ -113,6 +113,10 @@ async def broadcast_candle_proposal(symbol: str, interval: str, candle: dict[str
     key = _norm_key(symbol, interval)
     async with _lock:
         sockets = set(_proposal_subscribers.get(key, ()))
+    
+    if sockets:
+        logger.info("[BROADCAST_PROPOSAL] Key=%s | Subscribers=%d | Close=%s", key, len(sockets), candle.get("close"))
+    
     if not sockets:
         return
     t = candle.get("time")

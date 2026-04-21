@@ -105,7 +105,7 @@ export default function Home() {
 
   // Use safe defaults during SSR
   const safeSymbol = isMounted ? selectedSymbol : 'BTCUSDT';
-  const safeTimeframe = isMounted ? selectedTimeframe : '1m';
+  const safeTimeframe = isMounted ? selectedTimeframe : '15m';
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 

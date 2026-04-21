@@ -5,7 +5,7 @@ import { useCandlesStore, Candle } from '../store/candlesStore';
 
 /**
  * Same logic as BTC: REST bootstrap for selected symbol + live from WebSocket (useCandles).
- * - On mount and on every symbol change: fetch GET /candles/{symbol}/1m immediately (bootstrap).
+ * - On mount and on every symbol change: fetch GET /candles/{symbol}/15m immediately (bootstrap).
  * - Then poll every 30s for refresh/gap recovery.
  * This ensures every symbol gets REST data right away like BTC did; WS in useCandles adds live.
  */
@@ -19,7 +19,7 @@ export function useBackendCandlesLoader(selectedSymbol: string) {
 
     const fetchCandles = async () => {
       const apiBase = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:8000';
-      const url = `${apiBase}/candles/${selectedSymbol}/1m?limit=1000`;
+      const url = `${apiBase}/candles/${selectedSymbol}/15m?limit=1000`;
 
       try {
         const res = await fetch(url);
@@ -56,7 +56,7 @@ export function useBackendCandlesLoader(selectedSymbol: string) {
     const symbolChanged = lastSymbolRef.current !== selectedSymbol;
     if (symbolChanged) {
       lastSymbolRef.current = selectedSymbol;
-      console.log('[BackendLoader] ⚡ Bootstrap: fetching', selectedSymbol, '1m candles (same as BTC)...');
+      console.log('[BackendLoader] ⚡ Bootstrap: fetching', selectedSymbol, '15m candles (same as BTC)...');
       fetchCandles();
     }
 

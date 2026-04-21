@@ -132,8 +132,8 @@ async def fetch_klines_range(
 
 async def bootstrap_all() -> None:
     """Bootstrap history for all symbols, 1m interval only."""
-    BOOTSTRAP_INTERVAL = "1m"
-    logger.info("[BOOTSTRAP_START] Symbols=%s | Interval=%s (1m only)", SYMBOLS, BOOTSTRAP_INTERVAL)
+    BOOTSTRAP_INTERVAL = "15m"
+    logger.info("[BOOTSTRAP_START] Symbols=%s | Interval=%s (15m only)", SYMBOLS, BOOTSTRAP_INTERVAL)
     tasks = [
         bootstrap_symbol_interval(sym, BOOTSTRAP_INTERVAL)
         for sym in SYMBOLS
@@ -151,7 +151,7 @@ async def bootstrap_all() -> None:
 
 async def run_binance_ws_for_symbol(symbol: str) -> None:
     """Connect to Binance single-symbol kline stream (no combined stream) and push candles to store/broadcast."""
-    WS_INTERVAL = "1m"
+    WS_INTERVAL = "15m"
     interval = normalize_interval(WS_INTERVAL)
     symbol_norm = normalize_symbol(symbol)
     url = f"{BINANCE_WS_BASE}/ws/{symbol.lower()}@kline_{WS_INTERVAL}"
@@ -166,7 +166,7 @@ async def run_binance_ws_for_symbol(symbol: str) -> None:
             async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
                 _stream_status[symbol_norm]["connected"] = True
                 try:
-                    logger.info("[BINANCE_WS] Connected for %s (1m)", symbol_norm)
+                    logger.info("[BINANCE_WS] Connected for %s (15m)", symbol_norm)
                     async for message in ws:
                         try:
                             now = time.time()

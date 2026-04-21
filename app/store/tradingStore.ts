@@ -106,9 +106,10 @@ interface TradingState {
   setShowHistory: (show: boolean) => void;
 }
 
-// Backend-driven symbols: BTC, SOL, BNB, XRP; fallback when backend unavailable
+// Backend-driven symbols: BTC, ETH, SOL, BNB, XRP; fallback when backend unavailable
 export const BACKEND_SYMBOLS_FALLBACK: TradingPair[] = [
   { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', name: 'BTC/USDT', displayName: 'Bitcoin' },
+  { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', name: 'ETH/USDT', displayName: 'Ethereum' },
   { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', name: 'SOL/USDT', displayName: 'Solana' },
   { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', name: 'BNB/USDT', displayName: 'BNB' },
   { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', name: 'XRP/USDT', displayName: 'XRP' },
@@ -134,7 +135,7 @@ export const useTradingStore = create<TradingState>()(
     (set) => ({
       // Initial state
       selectedSymbol: 'BTCUSDT',
-      selectedTimeframe: '1m',
+      selectedTimeframe: '15m',
       favorites: [],
       tradingData: {
         currentPrice: 0,
@@ -211,6 +212,11 @@ export const useTradingStore = create<TradingState>()(
           }
           if (typeof state.selectedSymbol !== 'string') {
             state.selectedSymbol = 'BTCUSDT';
+          }
+          // Force 15m migration for stale storage
+          if (state.selectedTimeframe === '1m') {
+            state.selectedTimeframe = '15m';
+            console.log('Migrated stale 1m timeframe to 15m');
           }
         }
       },
