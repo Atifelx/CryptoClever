@@ -14,6 +14,9 @@ const FALLBACK_SYMBOLS = [
   'SOLUSDT',
   'BNBUSDT',
   'XRPUSDT',
+  'C:XAUUSD',
+  'C:EURUSD',
+  'C:USDJPY',
 ];
 
 /**

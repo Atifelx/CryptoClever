@@ -37,9 +37,9 @@ export default function SymbolList() {
         if (cancelled) return;
         if (data?.symbols && Array.isArray(data.symbols)) {
           const pairs: TradingPair[] = data.symbols
-            .filter((s) => SYMBOL_DISPLAY[s])
             .map((s) => {
               const d = SYMBOL_DISPLAY[s];
+              if (!d) return null;
               return {
                 symbol: s,
                 baseAsset: d.base,
@@ -47,7 +47,9 @@ export default function SymbolList() {
                 name: `${d.base}/${d.quote}`,
                 displayName: d.name,
               };
-            });
+            })
+            .filter((p): p is TradingPair => p !== null);
+
           if (pairs.length > 0) {
             setAllPairs(pairs, { USDT: pairs });
           }
