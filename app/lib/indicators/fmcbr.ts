@@ -123,8 +123,8 @@ function detectBreak(candles: Candle[], index: number): 'IB' | 'DB' | null {
     }
   }
   
-  if (opposingCount >= 3) return 'DB'; // Dominant Break (3+ opposing candles)
-  if (opposingCount >= 1) return 'IB'; // Initial Break (1-2 opposing candles)
+  if (opposingCount >= 4) return 'DB'; // Dominant Break (4+ opposing candles for stability)
+  if (opposingCount >= 2) return 'IB'; // Initial Break (at least 2 opposing candles to filter noise)
   
   return null;
 }
@@ -391,6 +391,13 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
   const dataBase = closedCandles.length > LOOKBACK_CANDLES
     ? closedCandles.slice(-LOOKBACK_CANDLES)
     : closedCandles;
+  
+  // Calculate 15m EMA 200 for Macro Trend Filtering
+  const baseCloses = dataBase.map(c => c.close);
+  const ema200 = computeEMA(baseCloses, 200);
+  const currentPrice = baseCloses[baseCloses.length - 1];
+  const macroTrend = ema200 > 0 ? (currentPrice > ema200 ? 'BULL' : 'BEAR') : 'NEUTRAL';
+
   const data = aggregateCandles(dataBase, AGGR_PERIOD_SECONDS);
 
   // Need enough 5m bars for break/CB1 detection (e.g. 40+ bars)
@@ -430,9 +437,17 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
       };
     }
 
-    // Determine direction (use data = 5m candles)
+    // Determine direction (use data = aggregated candles)
     const breakCandle = data[breakIndex];
     const direction: 'BULLISH' | 'BEARISH' = breakCandle.close > breakCandle.open ? 'BULLISH' : 'BEARISH';
+
+    // MACRO FILTER: block signals against the 200 EMA trend
+    if (direction === 'BULLISH' && macroTrend === 'BEAR') {
+      return { breakType: null, cb1: false, direction: null, swingHigh: 0, swingLow: 0, base: 0, setup: 0, levels: [], entryMajor: 0, entryMinor: 0, status: 'WAITING_BREAK' };
+    }
+    if (direction === 'BEARISH' && macroTrend === 'BULL') {
+      return { breakType: null, cb1: false, direction: null, swingHigh: 0, swingLow: 0, base: 0, setup: 0, levels: [], entryMajor: 0, entryMinor: 0, status: 'WAITING_BREAK' };
+    }
 
     // Step 2: Detect CB1 (on 5m series)
     const cb1Detected = detectCB1(data, breakIndex);
