@@ -43,8 +43,8 @@ export default function SymbolList() {
               return {
                 symbol: s,
                 baseAsset: d.base,
-                quoteAsset: 'USDT',
-                name: `${d.base}/USDT`,
+                quoteAsset: d.quote,
+                name: `${d.base}/${d.quote}`,
                 displayName: d.name,
               };
             });
@@ -97,7 +97,7 @@ export default function SymbolList() {
 
   const filteredPairs = filterPairs(allPairs);
 
-  const PairItem = ({ symbol, name, base }: { symbol: string; name: string; base: string }) => {
+  const PairItem = ({ symbol, name, base, quote }: { symbol: string; name: string; base: string; quote: string }) => {
     const isFavorite = favorites.includes(symbol);
     const isSelected = selectedSymbol === symbol;
 
@@ -122,7 +122,7 @@ export default function SymbolList() {
           <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-sm font-medium text-white truncate">{base}</span>
-              <span className="text-xs text-gray-500 flex-shrink-0">/USDT</span>
+              <span className="text-xs text-gray-500 flex-shrink-0">/{quote}</span>
             </div>
             <span className="text-xs text-gray-400 truncate">{name}</span>
           </div>
@@ -201,6 +201,7 @@ export default function SymbolList() {
                 symbol={pair.symbol}
                 name={pair.displayName || pair.name}
                 base={pair.baseAsset}
+                quote={pair.quoteAsset}
               />
             ))
           )}

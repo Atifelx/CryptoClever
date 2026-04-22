@@ -113,10 +113,13 @@ export const BACKEND_SYMBOLS_FALLBACK: TradingPair[] = [
   { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', name: 'SOL/USDT', displayName: 'Solana' },
   { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', name: 'BNB/USDT', displayName: 'BNB' },
   { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', name: 'XRP/USDT', displayName: 'XRP' },
+  { symbol: 'C:XAUUSD', baseAsset: 'XAU', quoteAsset: 'USD', name: 'XAU/USD', displayName: 'Gold' },
+  { symbol: 'C:EURUSD', baseAsset: 'EUR', quoteAsset: 'USD', name: 'EUR/USD', displayName: 'Euro' },
+  { symbol: 'C:USDJPY', baseAsset: 'USD', quoteAsset: 'JPY', name: 'USD/JPY', displayName: 'Yen' },
 ];
 
-export const SYMBOL_DISPLAY: Record<string, { name: string; base: string }> = Object.fromEntries(
-  BACKEND_SYMBOLS_FALLBACK.map((p) => [p.symbol, { name: p.displayName || p.name, base: p.baseAsset }])
+export const SYMBOL_DISPLAY: Record<string, { name: string; base: string; quote: string }> = Object.fromEntries(
+  BACKEND_SYMBOLS_FALLBACK.map((p) => [p.symbol, { name: p.displayName || p.name, base: p.baseAsset, quote: p.quoteAsset }])
 );
 
 export const POPULAR_PAIRS: TradingPair[] = [...BACKEND_SYMBOLS_FALLBACK];
