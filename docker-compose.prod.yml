@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/atifelx/cryptoclever/frontend:main}
+    container_name: smarttrade-frontend
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/atifelx/cryptoclever/backend:main}
+    container_name: smarttrade-backend
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MASSIVE_API_KEY=${MASSIVE_API_KEY}
+    depends_on:
+      - redis
+    ports:
+      - "8000:10000"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: smarttrade-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  redis-data:

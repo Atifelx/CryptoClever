@@ -1,0 +1,129 @@
+name: Deploy to Azure VM
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+  IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_BACKEND_URL=${{ secrets.NEXT_PUBLIC_BACKEND_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata (tags, labels) for Backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Azure VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/SmartTrade
+            # Update the production compose file
+            cat <<EOF > docker-compose.prod.yml
+            version: "3.9"
+            services:
+              frontend:
+                image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:main
+                container_name: smarttrade-frontend
+                ports:
+                  - "3000:3000"
+                restart: unless-stopped
+                environment:
+                  - NEXT_PUBLIC_BACKEND_URL=${{ secrets.NEXT_PUBLIC_BACKEND_URL }}
+                  - BACKEND_URL=http://backend:8000
+                depends_on:
+                  - backend
+
+              backend:
+                image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:main
+                container_name: smarttrade-backend
+                ports:
+                  - "8000:10000"
+                restart: unless-stopped
+                environment:
+                  - REDIS_URL=redis://redis:6379/0
+                  - MASSIVE_API_KEY=${{ secrets.MASSIVE_API_KEY }}
+                depends_on:
+                  - redis
+
+              redis:
+                image: redis:7-alpine
+                container_name: smarttrade-redis
+                command: ["redis-server", "--appendonly", "yes"]
+                volumes:
+                  - redis-data:/data
+                ports:
+                  - "6379:6379"
+                restart: unless-stopped
+
+            volumes:
+              redis-data:
+            EOF
+
+            # Login to GHCR on the VM
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Pull and restart
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            
+            # Cleanup old images
+            docker image prune -af

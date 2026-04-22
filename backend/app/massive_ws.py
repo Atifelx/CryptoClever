@@ -50,15 +50,27 @@ async def bootstrap_forex_symbol(symbol: str) -> None:
     
     logger.info("[MASSIVE_BOOTSTRAP] Fetching %s history from %s to %s", symbol, from_str, to_str)
     
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params, timeout=20.0)
-            r.raise_for_status()
-            data = r.json()
-            results = data.get("results", [])
-    except Exception as e:
-        logger.warning("[MASSIVE_BOOTSTRAP] %s failed: %s", symbol, e)
-        return
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, params=params, timeout=20.0)
+                if r.status_code == 429:
+                    wait_time = (attempt + 1) * 15 # Wait 15s, 30s, 45s
+                    logger.warning("[MASSIVE_BOOTSTRAP] Rate limit (429) for %s. Retrying in %ds...", symbol, wait_time)
+                    await asyncio.sleep(wait_time)
+                    continue
+                r.raise_for_status()
+                data = r.json()
+                results = data.get("results", [])
+                break # Success
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logger.warning("[MASSIVE_BOOTSTRAP] %s failed after %d attempts: %s", symbol, max_retries, e)
+                return
+            await asyncio.sleep(5)
+    else:
+        return # Failed after retries
 
     candles = []
     for res in results:
@@ -83,8 +95,14 @@ async def bootstrap_all_forex() -> None:
         logger.warning("[MASSIVE_BOOTSTRAP] No API key found. Skipping.")
         return
     logger.info("[MASSIVE_BOOTSTRAP] Starting for %s", FOREX_SYMBOLS)
-    tasks = [bootstrap_forex_symbol(sym) for sym in FOREX_SYMBOLS]
-    await asyncio.gather(*tasks, return_exceptions=True)
+    # Sequential bootstrap to avoid 429 Rate Limit (Common on Massive/Polygon Free keys)
+    for sym in FOREX_SYMBOLS:
+        try:
+            await bootstrap_forex_symbol(sym)
+            await asyncio.sleep(2) # Small gap between symbols
+        except Exception as e:
+            logger.error("[MASSIVE_BOOTSTRAP] Error in sequence for %s: %s", sym, e)
+
 
 async def run_massive_ws_for_symbol(symbol: str) -> None:
     """Connect to Massive Forex WebSocket, authenticate, and stream 15m aggregates."""
