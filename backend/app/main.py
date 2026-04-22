@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
 from app.binance_ws import bootstrap_all, get_stream_status, run_binance_ws_for_symbol
-from app.config import INTERVALS, SYMBOLS
+from app.massive_ws import bootstrap_all_forex, run_massive_ws_for_symbol
+from app.config import INTERVALS, SYMBOLS, CRYPTO_SYMBOLS, FOREX_SYMBOLS
 from app.redis_store import get_candles, get_signals, set_signals, close_redis, get_last_append_time, append_candle, get_store_keys_info
 from app.utils import build_candle_key, normalize_interval, normalize_symbol
 from app.indicators import compute_signals
@@ -31,10 +32,15 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables ready")
     except Exception as e:
         logger.warning("Database init skipped or failed: %s", e)
-    logger.info("Bootstrapping candles from Binance REST...")
-    await bootstrap_all()
-    _ws_tasks = [asyncio.create_task(run_binance_ws_for_symbol(sym)) for sym in SYMBOLS]
-    logger.info("Binance WebSocket tasks started (one per symbol: %s)", list(SYMBOLS))
+    logger.info("Bootstrapping candles (Binance & Massive)...")
+    await bootstrap_all() # Binance
+    await bootstrap_all_forex() # Forex (Massive)
+    
+    binance_tasks = [asyncio.create_task(run_binance_ws_for_symbol(sym)) for sym in CRYPTO_SYMBOLS]
+    massive_tasks = [asyncio.create_task(run_massive_ws_for_symbol(sym)) for sym in FOREX_SYMBOLS]
+    _ws_tasks = binance_tasks + massive_tasks
+    
+    logger.info("WebSocket tasks started: Binance(%d), Massive(%d)", len(binance_tasks), len(massive_tasks))
     yield
     for t in _ws_tasks:
         t.cancel()

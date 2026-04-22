@@ -5,14 +5,21 @@ from dotenv import load_dotenv
 # Load .env from backend directory so DATABASE_URL etc. can override defaults
 load_dotenv()
 
-# BTC + ETH, SOL, BNB, XRP (15m)
+# Unified symbols (Crypto + Forex)
 SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
     "SOLUSDT",
     "BNBUSDT",
     "XRPUSDT",
+    "C:XAUUSD",
+    "C:EURUSD",
+    "C:USDJPY",
 ]
+
+# Separate Forex symbols for provider routing
+FOREX_SYMBOLS = ["C:XAUUSD", "C:EURUSD", "C:USDJPY"]
+CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 
 # Only 15m interval for minimal server load
 INTERVALS = ["15m"]
@@ -26,6 +33,11 @@ BUFFER_SIZE = 1000  # Max candles per symbol/interval in Redis
 BINANCE_WS_BASE = "wss://stream.binance.com:9443"
 # Binance REST for bootstrap
 BINANCE_REST_BASE = "https://api.binance.com/api/v3"
+
+# Massive (Polygon-style) for Forex/Gold
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY", "5twdPmXQm1VQhTIFnok2RCx4dZmS7c3u")
+MASSIVE_WS_BASE = "wss://socket.massive.com/forex" # User's clusters for Forex/Currencies
+MASSIVE_REST_BASE = "https://api.massive.com"
 
 # Proxy configuration (optional - set HTTP_PROXY env var if Binance is blocked)
 # Example: HTTP_PROXY=http://proxy.example.com:8080
