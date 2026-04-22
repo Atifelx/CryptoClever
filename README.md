@@ -1,6 +1,8 @@
-# CryptoClever - Real-Time Crypto Trading Platform
+# CryptoClever - Real-Time Crypto & Forex Trading Platform
 
-A professional Next.js 14+ cryptocurrency trading platform with real-time charts, powered by Binance free API. Built with TypeScript, Tailwind CSS, and lightweight-charts.
+![Deploy to Azure VM](https://github.com/Atifelx/CryptoClever/actions/workflows/deploy.yml/badge.svg)
+
+A professional Next.js 14+ cryptocurrency and forex trading platform with real-time charts and automated deployment.
 
 **Built by [Atif Shaikh](https://www.linkedin.com/in/atif-shaikh)**
 
