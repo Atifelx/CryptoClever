@@ -281,7 +281,7 @@ export default function UnifiedMarkerManager({
           : `FMCBR: ${fmcbrSignal.status}${breakType ? ` (${breakType})` : ''}${cb1 ? ' CB1✓' : ''}`;
         allMarkers.push({
           time: referenceTime as any,
-          position: 'inBar',
+          position: direction === 'BEARISH' ? 'aboveBar' : 'belowBar',
           color: statusColor,
           shape: 'circle',
           size: 2.5,
@@ -301,39 +301,7 @@ export default function UnifiedMarkerManager({
           });
         }
 
-        // Level circles (only when levels exist; horizontal lines are in FMCBROverlay)
-        if (levels && levels.length > 0) {
-          levels.forEach(level => {
-            let color = '#888888';
-            let size = 1.5;
-            let position: 'aboveBar' | 'belowBar' | 'inBar' = 'inBar';
-            if (level.type === 'base') {
-              color = scheme.base;
-              size = 2.5;
-              position = direction === 'BULLISH' ? 'aboveBar' : 'belowBar';
-            } else if (level.type === 'setup') {
-              color = scheme.setup;
-              size = 2.5;
-              position = direction === 'BULLISH' ? 'belowBar' : 'aboveBar';
-            } else if (level.type === 'entry') {
-              color = scheme.entry;
-              size = 2.0;
-              position = direction === 'BULLISH' ? 'belowBar' : 'aboveBar';
-            } else if (level.type === 'tp') {
-              color = scheme.tp;
-              size = 1.5;
-              position = direction === 'BULLISH' ? 'aboveBar' : 'belowBar';
-            }
-            allMarkers.push({
-              time: referenceTime as any,
-              position,
-              color,
-              shape: 'circle',
-              size,
-              text: `${level.label}: ${level.price.toFixed(2)}`,
-            });
-          });
-        }
+        // Level circles removed to avoid blocking candles (horizontal lines in FMCBROverlay remain)
         // When we have LONG/SHORT signal, do not add "Waiting for cb1..." — keeps chart clean
       }
     }

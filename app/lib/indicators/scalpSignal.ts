@@ -172,6 +172,46 @@ function calculateVWAP(candles: Candle[]): number[] {
   return vwap;
 }
 
+/** Aggregate 15m (base) candles to 1h: every 4 consecutive bars → one bar. */
+function aggregateTo1h(candles: Candle[]): Candle[] {
+  const out: Candle[] = [];
+  for (let i = 0; i + 4 <= candles.length; i += 4) {
+    const chunk = candles.slice(i, i + 4);
+    const open = chunk[0].open;
+    const high = Math.max(...chunk.map(c => c.high));
+    const low = Math.min(...chunk.map(c => c.low));
+    const close = chunk[chunk.length - 1].close;
+    const volume = chunk.reduce((s, c) => s + (c.volume ?? 0), 0);
+    const time = chunk[chunk.length - 1].time;
+    out.push({ time, open, high, low, close, volume });
+  }
+  return out;
+}
+
+/** ATR (Average True Range) calculation */
+function calculateATR(candles: Candle[], period: number): number[] {
+  if (candles.length < period + 1) return [];
+  const tr: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevClose = candles[i - 1].close;
+    const d1 = high - low;
+    const d2 = Math.abs(high - prevClose);
+    const d3 = Math.abs(low - prevClose);
+    tr.push(Math.max(d1, d2, d3));
+  }
+  const atr: number[] = [];
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += tr[i];
+  atr.push(sum / period);
+  for (let i = period; i < tr.length; i++) {
+    const prevAtr = atr[atr.length - 1];
+    atr.push((prevAtr * (period - 1) + tr[i]) / period);
+  }
+  return atr;
+}
+
 // ─── Helper: Momentum (percentage change over N periods) ───
 function calculateMomentum(closes: number[], period: number): number[] {
   const momentum: number[] = [];
@@ -224,6 +264,20 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const volumeMA = calculateSMA(volumes, VOLUME_MA_PERIOD);
   const vwap = calculateVWAP(data);
   const momentum = calculateMomentum(closes, MOMENTUM_PERIOD);
+  const atr = calculateATR(data, 14);
+
+  // 1-HOUR TREND CALCULATION (15m → 1h)
+  const data1h = aggregateTo1h(data);
+  let htfTrend: 'BULL' | 'BEAR' | 'NEUTRAL' = 'NEUTRAL';
+  if (data1h.length >= 50) {
+    const htfCloses = data1h.map(c => c.close);
+    const ema20 = calculateEMA(htfCloses, 20);
+    const ema50 = calculateEMA(htfCloses, 50);
+    const e20 = ema20[ema20.length - 1];
+    const e50 = ema50[ema50.length - 1];
+    if (e20 > e50) htfTrend = 'BULL';
+    else if (e20 < e50) htfTrend = 'BEAR';
+  }
 
   // Get current values (last index)
   const currentIndex = data.length - 1;
@@ -271,10 +325,13 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
     currentBBMiddle == null || currentBBUpper == null || currentBBLower == null ||
     currentVolumeMA == null ||
     currentVWAP == null ||
-    currentMomentum == null
+    currentMomentum == null ||
+    atr.length === 0
   ) {
     return { signal: 'WAIT', reason: 'Calculating indicators...' };
   }
+  
+  const currentATR = atr[atr.length - 1];
 
   // ──── TREND FILTERING (Prevent counter-trend signals) ────
   // Analyze last 15 candles to detect clear trend direction
@@ -410,28 +467,27 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const longScore = longConditions.filter(Boolean).length;
   const shortScore = shortConditions.filter(Boolean).length;
 
-  // Risk management parameters
-  const TAKE_PROFIT_PCT = 0.008; // 0.8%
-  const STOP_LOSS_PCT = 0.004; // 0.4%
+  // ATR-based dynamic risk management
+  const TAKE_PROFIT_1_MULT = 1.5;
+  const TAKE_PROFIT_2_MULT = 3.0;
+  const STOP_LOSS_MULT = 1.5;
 
-  // RELAXED THRESHOLD: Require 4/6 conditions (was 5/6) OR strong momentum OR BB mean reversion OR swing reversal
-  // BLOCK LONG when recent fall swing (1m: do not show strong buy after 3+ down candles)
+  // TIGHTER THRESHOLD: Require 5/6 conditions (was 4/6) AND 1h Trend Alignment
   if (
     !recentFallSwing &&
-    (longScore >= 4 || bbLong || strongMomentumLong || swingReversalLong)
+    htfTrend !== 'BEAR' && // 1h Trend MUST NOT be Bearish for LONG
+    (longScore >= 5 || (longScore >= 4 && (bbLong || strongMomentumLong || swingReversalLong)))
   ) {
     // LONG signal
-    const stopLoss = currentClose * (1 - STOP_LOSS_PCT);
-    const takeProfit1 = currentClose * (1 + TAKE_PROFIT_PCT);
-    const takeProfit2 = currentClose * (1 + TAKE_PROFIT_PCT * 1.5); // Extended TP
+    const stopLoss = currentClose - (currentATR * STOP_LOSS_MULT);
+    const takeProfit1 = currentClose + (currentATR * TAKE_PROFIT_1_MULT);
+    const takeProfit2 = currentClose + (currentATR * TAKE_PROFIT_2_MULT);
 
     // Calculate confidence based on conditions met
-    let confidence = 70;
-    if (longScore >= 6) confidence = 90;
-    else if (strongMomentumLong) confidence = 85; // Strong momentum
-    else if (bbLong) confidence = 75; // BB mean reversion
-    else if (longScore >= 5) confidence = 80;
-    else if (longScore === 4) confidence = 70; // Relaxed threshold
+    let confidence = 75;
+    if (longScore >= 6) confidence = 95;
+    else if (longScore >= 5) confidence = 85;
+    else confidence = 75;
 
     return {
       signal: 'LONG',
@@ -440,35 +496,28 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       takeProfit1,
       takeProfit2,
       confidence,
-      reason: swingReversalLong
-        ? `Swing reversal detected (last 5 candles)`
-        : strongMomentumLong 
-        ? `Strong momentum (${currentMomentum.toFixed(2)}%)`
-        : bbLong 
-        ? 'Bollinger Band mean reversion (oversold)' 
-        : `EMA trend + momentum (${longScore}/6 conditions, vol: ${volumeRatio.toFixed(2)}x)`,
-      marketState: 'BULLISH_TREND',
+      reason: htfTrend === 'BULL' 
+        ? `Aligned with 1h BULL trend | ${longScore}/6 conditions met`
+        : `Recovery signal | ${longScore}/6 conditions met`,
+      marketState: htfTrend === 'BULL' ? 'BULLISH_TREND' : 'NEUTRAL',
       rsi: currentRSI,
       volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.0 ? 'MODERATE' : 'NORMAL',
     };
   } else if (
+    htfTrend !== 'BULL' && // 1h Trend MUST NOT be Bullish for SHORT
     !isClearUptrend &&
-    (shortScore >= 4 || bbShort || strongMomentumShort || swingReversalShort || (recentFallSwing && shortScore >= 3))
+    (shortScore >= 5 || (shortScore >= 4 && (bbShort || strongMomentumShort || swingReversalShort)))
   ) {
-    // SHORT signal (relaxed to shortScore >= 3 when recent fall swing detected)
-    const stopLoss = currentClose * (1 + STOP_LOSS_PCT);
-    const takeProfit1 = currentClose * (1 - TAKE_PROFIT_PCT);
-    const takeProfit2 = currentClose * (1 - TAKE_PROFIT_PCT * 1.5); // Extended TP
+    // SHORT signal
+    const stopLoss = currentClose + (currentATR * STOP_LOSS_MULT);
+    const takeProfit1 = currentClose - (currentATR * TAKE_PROFIT_1_MULT);
+    const takeProfit2 = currentClose - (currentATR * TAKE_PROFIT_2_MULT);
 
-    // Calculate confidence based on conditions met
-    let confidence = 70;
-    if (shortScore >= 6) confidence = 90;
-    else if (swingReversalShort) confidence = 80; // Swing reversal (fast signal)
-    else if (strongMomentumShort) confidence = 85; // Strong momentum
-    else if (bbShort) confidence = 75; // BB mean reversion
-    else if (shortScore >= 5) confidence = 80;
-    else if (shortScore === 4) confidence = 70; // Relaxed threshold
-    else if (recentFallSwing && shortScore === 3) confidence = 65; // Recent fall swing, lower bar for SHORT
+    // Calculate confidence
+    let confidence = 75;
+    if (shortScore >= 6) confidence = 95;
+    else if (shortScore >= 5) confidence = 85;
+    else confidence = 75;
 
     return {
       signal: 'SHORT',
@@ -477,16 +526,10 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       takeProfit1,
       takeProfit2,
       confidence,
-      reason: swingReversalShort
-        ? `Swing reversal detected (last 5 candles)`
-        : strongMomentumShort 
-        ? `Strong momentum (${currentMomentum.toFixed(2)}%)`
-        : bbShort 
-        ? 'Bollinger Band mean reversion (overbought)' 
-        : recentFallSwing && shortScore === 3
-        ? `Recent fall swing (${shortScore}/6 conditions)`
-        : `EMA trend + momentum (${shortScore}/6 conditions, vol: ${volumeRatio.toFixed(2)}x)`,
-      marketState: 'BEARISH_TREND',
+      reason: htfTrend === 'BEAR'
+        ? `Aligned with 1h BEAR trend | ${shortScore}/6 conditions met`
+        : `Rejection signal | ${shortScore}/6 conditions met`,
+      marketState: htfTrend === 'BEAR' ? 'BEARISH_TREND' : 'NEUTRAL',
       rsi: currentRSI,
       volume: volumeRatio > 1.5 ? 'HIGH' : volumeRatio > 1.0 ? 'MODERATE' : 'NORMAL',
     };

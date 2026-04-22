@@ -9,7 +9,7 @@
 import type { Candle } from '../../store/candlesStore';
 
 // ──── AGGREGATION: 1m → 5m ────
-const AGGR_PERIOD_MINUTES = 5;
+const AGGR_PERIOD_MINUTES = 60; // 1 hour for professional 15m FMCBR accuracy
 const AGGR_PERIOD_SECONDS = AGGR_PERIOD_MINUTES * 60;
 
 /**
@@ -374,24 +374,24 @@ function calculateFibonacciEntry(
 }
 
 // ──── Main FMCBR Strategy ────
-/** Minimum 1m candles to aggregate (e.g. 200 1m → 40 5m) */
-const MIN_1M_CANDLES = 200;
-/** Use last N 1m candles for aggregation (official: 1000) */
-const LOOKBACK_1M = 1000;
+/** Minimum base candles for algorithm (e.g. 60 15m → 15 1h) */
+const MIN_BASE_CANDLES = 60;
+/** Total lookback for analysis (1000 candles) */
+const LOOKBACK_CANDLES = 1000;
 
 export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
   // CRITICAL: Use only closed candles to prevent repainting
   const closedCandles = candles.slice(0, candles.length - 1);
 
-  if (!closedCandles || closedCandles.length < MIN_1M_CANDLES) {
+  if (!closedCandles || closedCandles.length < MIN_BASE_CANDLES) {
     return null;
   }
 
-  // Use last 1000 1m candles, then convert to 5m for algorithm (more accurate)
-  const data1m = closedCandles.length > LOOKBACK_1M
-    ? closedCandles.slice(-LOOKBACK_1M)
+  // Use last 1000 base candles (e.g. 15m), then aggregate to 1h for algorithm
+  const dataBase = closedCandles.length > LOOKBACK_CANDLES
+    ? closedCandles.slice(-LOOKBACK_CANDLES)
     : closedCandles;
-  const data = aggregateCandles(data1m, AGGR_PERIOD_SECONDS);
+  const data = aggregateCandles(dataBase, AGGR_PERIOD_SECONDS);
 
   // Need enough 5m bars for break/CB1 detection (e.g. 40+ bars)
   if (data.length < 40) {
