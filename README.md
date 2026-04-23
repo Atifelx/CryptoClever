@@ -6,6 +6,11 @@ A professional Next.js 14+ cryptocurrency and forex trading platform with real-t
 
 **Built by [Atif Shaikh](https://www.linkedin.com/in/atif-shaikh)**
 
+## 📊 System Status
+- **Backend**: Online (Azure VM)
+- **Frontend**: Live (Edge optimized)
+- **Pipeline**: GitHub Actions CI/CD
+
 ## 🚀 Features
 
 - **Real-Time Charts**: Live candlestick charts with WebSocket data from Binance
