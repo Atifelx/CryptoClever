@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
 from app.binance_ws import bootstrap_all, get_stream_status, run_binance_ws_for_symbol
-from app.massive_ws import bootstrap_all_forex, run_massive_ws_for_symbol
+from app.twelvedata_ws import bootstrap_all_forex, run_twelvedata_poll_for_symbol
 from app.config import INTERVALS, SYMBOLS, CRYPTO_SYMBOLS, FOREX_SYMBOLS
 from app.redis_store import get_candles, get_signals, set_signals, close_redis, get_last_append_time, append_candle, get_store_keys_info
 from app.utils import build_candle_key, normalize_interval, normalize_symbol
@@ -32,15 +32,15 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables ready")
     except Exception as e:
         logger.warning("Database init skipped or failed: %s", e)
-    logger.info("Bootstrapping candles (Binance & Massive)...")
+    logger.info("Bootstrapping candles (Binance & Twelve Data)...")
     await bootstrap_all() # Binance
-    await bootstrap_all_forex() # Forex (Massive)
+    await bootstrap_all_forex() # Forex (Twelve Data)
     
     binance_tasks = [asyncio.create_task(run_binance_ws_for_symbol(sym)) for sym in CRYPTO_SYMBOLS]
-    massive_tasks = [asyncio.create_task(run_massive_ws_for_symbol(sym)) for sym in FOREX_SYMBOLS]
-    _ws_tasks = binance_tasks + massive_tasks
+    forex_tasks = [asyncio.create_task(run_twelvedata_poll_for_symbol(sym)) for sym in FOREX_SYMBOLS]
+    _ws_tasks = binance_tasks + forex_tasks
     
-    logger.info("WebSocket tasks started: Binance(%d), Massive(%d)", len(binance_tasks), len(massive_tasks))
+    logger.info("Streaming tasks started: Binance(%d), TwelveData(%d)", len(binance_tasks), len(forex_tasks))
     yield
     for t in _ws_tasks:
         t.cancel()

@@ -39,6 +39,10 @@ MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY", "5twdPmXQm1VQhTIFnok2RCx4dZmS7c3u
 MASSIVE_WS_BASE = "wss://socket.massive.com/forex" # User's clusters for Forex/Currencies
 MASSIVE_REST_BASE = "https://api.massive.com"
 
+# Twelve Data for Forex/Gold replacement
+TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
+TWELVEDATA_REST_BASE = "https://api.twelvedata.com"
+
 # Proxy configuration (optional - set HTTP_PROXY env var if Binance is blocked)
 # Example: HTTP_PROXY=http://proxy.example.com:8080
 HTTP_PROXY = os.getenv("HTTP_PROXY", None)

@@ -18,7 +18,7 @@ services:
     container_name: smarttrade-backend
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - MASSIVE_API_KEY=${MASSIVE_API_KEY}
+      - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY}
     depends_on:
       - redis
     ports:

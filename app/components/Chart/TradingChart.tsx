@@ -61,12 +61,12 @@ export default function TradingChart({
   const lastCandle = candles.length > 0 ? candles[candles.length - 1] : null;
   const lastCandleAgeSeconds = lastCandle ? Math.max(0, Math.floor(Date.now() / 1000) - lastCandle.time) : null;
   const connectionLabel = isForexSymbol
-    ? '15m Delayed'
+    ? '15m Updates'
     : isConnected
       ? 'Live'
       : 'Disconnected';
   const priceStatusLabel = isForexSymbol
-    ? 'DELAYED'
+    ? '15M'
     : isConnected
       ? 'LIVE'
       : 'Disconnected';

@@ -104,7 +104,7 @@ jobs:
                 restart: unless-stopped
                 environment:
                   - REDIS_URL=redis://redis:6379/0
-                  - MASSIVE_API_KEY=${{ secrets.MASSIVE_API_KEY }}
+                  - TWELVEDATA_API_KEY=${{ secrets.TWELVEDATA_API_KEY }}
                 depends_on:
                   - redis
 

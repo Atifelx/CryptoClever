@@ -11,7 +11,7 @@ import websockets
 from app.config import (
     BINANCE_REST_BASE,
     BINANCE_WS_BASE,
-    SYMBOLS,
+    CRYPTO_SYMBOLS,
     HTTP_PROXY,
     HTTPS_PROXY,
 )
@@ -133,13 +133,13 @@ async def fetch_klines_range(
 async def bootstrap_all() -> None:
     """Bootstrap history for all symbols, 1m interval only."""
     BOOTSTRAP_INTERVAL = "15m"
-    logger.info("[BOOTSTRAP_START] Symbols=%s | Interval=%s (15m only)", SYMBOLS, BOOTSTRAP_INTERVAL)
+    logger.info("[BOOTSTRAP_START] Symbols=%s | Interval=%s (15m only)", CRYPTO_SYMBOLS, BOOTSTRAP_INTERVAL)
     tasks = [
         bootstrap_symbol_interval(sym, BOOTSTRAP_INTERVAL)
-        for sym in SYMBOLS
+        for sym in CRYPTO_SYMBOLS
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
-    for sym in SYMBOLS:
+    for sym in CRYPTO_SYMBOLS:
         try:
             stored = await get_candles(sym, BOOTSTRAP_INTERVAL, 5)
             last_close = stored[-1].get("close") if stored else "EMPTY"
