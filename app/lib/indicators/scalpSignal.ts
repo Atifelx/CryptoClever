@@ -362,8 +362,8 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const bearishRatio = bearishCandles / totalCandles;
   const netPriceChange = (trendCloses[trendCloses.length - 1] - trendCloses[0]) / trendCloses[0];
   
-  const isClearUptrend = bullishRatio >= 0.7 && netPriceChange > 0.001; // 70% bullish + price up >0.1%
-  const isClearDowntrend = bearishRatio >= 0.7 && netPriceChange < -0.001; // 70% bearish + price down >0.1%
+  const isClearUptrend = bullishRatio >= 0.7 && netPriceChange > 0.0003; // 70% bullish + price up >0.03%
+  const isClearDowntrend = bearishRatio >= 0.7 && netPriceChange < -0.0003; // 70% bearish + price down >0.03%
 
   // ──── RECENT FALL SWING (1m: block LONG after sudden drop) ────
   // Last 4 candles: if ≥3 bearish and net change < -0.1%, do not show LONG; prefer WAIT or SHORT
@@ -377,7 +377,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       if (last4Closes[i] < last4Closes[i - 1]) bearishCount++;
     }
     const netChange4 = (last4Closes[last4Closes.length - 1] - last4Closes[0]) / last4Closes[0];
-    if (bearishCount >= 3 && netChange4 < -0.001) {
+    if (bearishCount >= 3 && netChange4 < -0.0005) {
       recentFallSwing = true;
     }
     // Also: last 3 candles all red (strong fall)
@@ -386,7 +386,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
       const last3Closes = last3.map(c => c.close);
       const all3Red = last3Closes[1] < last3Closes[0] && last3Closes[2] < last3Closes[1];
       const drop3 = (last3Closes[2] - last3Closes[0]) / last3Closes[0];
-      if (all3Red && drop3 < -0.0015) recentFallSwing = true;
+      if (all3Red && drop3 < -0.0005) recentFallSwing = true;
     }
   }
 
@@ -434,7 +434,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const longConditions = [
     !isClearDowntrend, // CRITICAL: Block LONG signals during clear downtrends
     currentEMAFast > currentEMASlow || isClearUptrend, // Uptrend OR clear uptrend from candles
-    prevEMAFast <= prevEMASlow || (currentEMAFast > currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005) || isClearUptrend, // EMA crossover OR strong trend OR clear uptrend
+    prevEMAFast <= prevEMASlow || (currentEMAFast > currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0001) || isClearUptrend, // EMA crossover OR strong trend OR clear uptrend
     currentRSI > 35 && currentRSI < 75, // RSI relaxed range (was 40-70)
     currentClose > currentVWAP * 0.9995 || isClearUptrend, // Price near or above VWAP OR clear uptrend
     volumeRatio > 0.8, // Volume relaxed: >0.8x average (was >1.2x) for 1-minute scalping
@@ -446,7 +446,7 @@ export function generateScalpSignal(candles: Candle[]): ScalpSignalResult {
   const shortConditions = [
     !isClearUptrend, // CRITICAL: Block SHORT signals during clear uptrends
     currentEMAFast < currentEMASlow || isClearDowntrend, // Downtrend OR clear downtrend from candles
-    prevEMAFast >= prevEMASlow || (currentEMAFast < currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0005) || isClearDowntrend, // EMA crossover OR strong trend OR clear downtrend
+    prevEMAFast >= prevEMASlow || (currentEMAFast < currentEMASlow && Math.abs(currentEMAFast - currentEMASlow) / currentEMASlow > 0.0001) || isClearDowntrend, // EMA crossover OR strong trend OR clear downtrend
     currentRSI < 65 && currentRSI > 25, // RSI relaxed range (was 30-60)
     currentClose < currentVWAP * 1.0005 || isClearDowntrend, // Price near or below VWAP OR clear downtrend
     volumeRatio > 0.8, // Volume relaxed: >0.8x average (was >1.2x)

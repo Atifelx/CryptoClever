@@ -98,6 +98,22 @@ function getTrend(candles: Candle[], index: number): 'UP' | 'DOWN' {
   return current.close > previous.close ? 'UP' : 'DOWN';
 }
 
+// ──── Helper: Exponential Moving Average ────
+function computeEMA(values: number[], period: number): number {
+  if (values.length === 0) return 0;
+  if (values.length < period) {
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+  const k = 2 / (period + 1);
+  let ema = 0;
+  for (let i = 0; i < period; i++) ema += values[i];
+  ema /= period;
+  for (let i = period; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+  }
+  return ema;
+}
+
 // ──── Helper: Check if candle is opposing trend ────
 function isOpposing(candle: Candle, trend: 'UP' | 'DOWN'): boolean {
   if (trend === 'UP') {

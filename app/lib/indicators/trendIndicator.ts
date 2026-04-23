@@ -219,7 +219,7 @@ export function identifyTrendWithVolume(candles: Candle[]): TrendInfo | null {
     // SIDEWAYS: flat EMAs and neutral structure
     const flatSlope = Math.abs(slopeLong) < 0.2 && Math.abs(slopeShort) < 0.1;
     const noStructureBias = structureBias === 'NEUTRAL';
-    if (flatSlope && noStructureBias && emaSpread < 0.01) {
+    if (flatSlope && noStructureBias && emaSpread < 0.002) {
       trend = 'SIDEWAYS';
       action = 'NO_BUY';
     } else if (upTotal > downTotal) {
@@ -241,7 +241,7 @@ export function identifyTrendWithVolume(candles: Candle[]): TrendInfo | null {
     if (structureBias === 'UP') conf += 10;
     if (volumeRatio > 1.0) conf += 5;
     if (volumeRatio < 0.7) conf -= 5;
-    if (emaSpread < 0.005) conf -= 10;
+    if (emaSpread < 0.0005) conf -= 10;
     confidence = Math.max(40, Math.min(100, conf));
   } else if (trend === 'DOWNTREND') {
     let conf = 60;
@@ -249,11 +249,11 @@ export function identifyTrendWithVolume(candles: Candle[]): TrendInfo | null {
     if (structureBias === 'DOWN') conf += 10;
     if (volumeRatio > 1.0) conf += 5;
     if (volumeRatio < 0.7) conf -= 5;
-    if (emaSpread < 0.005) conf -= 10;
+    if (emaSpread < 0.0005) conf -= 10;
     confidence = Math.max(40, Math.min(100, conf));
   } else {
     let conf = 50;
-    if (emaSpread < 0.005) conf = 40;
+    if (emaSpread < 0.0005) conf = 40;
     confidence = conf;
   }
 
