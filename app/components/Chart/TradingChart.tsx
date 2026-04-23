@@ -40,6 +40,7 @@ export default function TradingChart({
   onToggleIndicator,
   onIndicatorDataUpdate,
 }: TradingChartProps) {
+  const isForexSymbol = symbol.startsWith('C:');
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -57,6 +58,34 @@ export default function TradingChart({
   const isCleaningUpRef = useRef<boolean>(false);
 
   const { candles, isConnected, isLoading } = useCandles(symbol);
+  const lastCandle = candles.length > 0 ? candles[candles.length - 1] : null;
+  const lastCandleAgeSeconds = lastCandle ? Math.max(0, Math.floor(Date.now() / 1000) - lastCandle.time) : null;
+  const connectionLabel = isForexSymbol
+    ? '15m Delayed'
+    : isConnected
+      ? 'Live'
+      : 'Disconnected';
+  const priceStatusLabel = isForexSymbol
+    ? 'DELAYED'
+    : isConnected
+      ? 'LIVE'
+      : 'Disconnected';
+  const priceStatusClass = isForexSymbol
+    ? 'text-amber-400'
+    : isConnected
+      ? 'text-green-500'
+      : 'text-red-400';
+  const priceDotClass = isForexSymbol
+    ? 'bg-amber-400 w-[9.6px] h-[9.6px]'
+    : isConnected
+      ? 'bg-green-500 w-[9.6px] h-[9.6px]'
+      : 'bg-red-500 w-2 h-2';
+  const lastUpdateLabel = lastCandle
+    ? `Last candle ${formatIST(lastCandle.time * 1000)}`
+    : 'Waiting for candle data';
+  const staleLabel = isForexSymbol && lastCandleAgeSeconds !== null && lastCandleAgeSeconds > 3600
+    ? `Source is ${Math.floor(lastCandleAgeSeconds / 3600)}h behind`
+    : null;
 
   // ─── Single source of truth: candles are for the SELECTED symbol only (same logic as BTC).
   // useCandles(symbol) returns getCandlesForSymbol(symbol) from Zustand — never BTC or another symbol's data.
@@ -669,14 +698,14 @@ export default function TradingChart({
       {/* Connection status indicator */}
       <div className="flex items-center gap-2 mb-4 px-1">
         <span className="font-semibold text-white">{symbol}</span>
-        {isConnected ? (
+        {(isConnected || isForexSymbol) ? (
           <>
             <span
-              className="inline-block w-3 h-3 rounded-full flex-shrink-0 bg-green-500 live-dot-glow-shrink"
+              className={`inline-block w-3 h-3 rounded-full flex-shrink-0 live-dot-glow-shrink ${isForexSymbol ? 'bg-amber-400' : 'bg-green-500'}`}
               aria-hidden
-              title="Connected"
+              title={connectionLabel}
             />
-            <span className="text-sm text-gray-400">Live</span>
+            <span className="text-sm text-gray-400">{connectionLabel}</span>
           </>
         ) : (
           <span className="text-sm text-gray-400">○ Disconnected</span>
@@ -706,13 +735,15 @@ export default function TradingChart({
             <div className="text-2xl text-white font-bold">
               ${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-            <div className="text-xs text-green-500 flex items-center gap-1 mt-1">
+            <div className={`text-xs flex items-center gap-1 mt-1 ${priceStatusClass}`}>
               <span
-                className={`inline-block rounded-full flex-shrink-0 live-dot-glow-shrink ${isConnected ? 'bg-green-500 w-[9.6px] h-[9.6px]' : 'bg-red-500 w-2 h-2'}`}
+                className={`inline-block rounded-full flex-shrink-0 live-dot-glow-shrink ${priceDotClass}`}
                 aria-hidden
               />
-              {isConnected ? 'LIVE' : 'Disconnected'}
+              {priceStatusLabel}
             </div>
+            <div className="text-xs text-gray-500 mt-1">{lastUpdateLabel}</div>
+            {staleLabel && <div className="text-xs text-amber-400 mt-1">{staleLabel}</div>}
           </div>
         </div>
 

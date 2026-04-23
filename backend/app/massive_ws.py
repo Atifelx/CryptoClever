@@ -26,6 +26,7 @@ _BOOTSTRAP_BACKOFF_SECONDS = 12
 _POLLER_LOOKBACK_DAYS = 2
 _BOOTSTRAP_FETCH_LIMIT = 900
 _POLL_BUFFER_SECONDS = 20
+_FOREX_INTERVAL = "15m"
 
 def _massive_to_candle(m: dict[str, Any]) -> dict[str, Any]:
     """Convert Massive aggregate minute (AM) payload to our candle format."""
@@ -38,6 +39,16 @@ def _massive_to_candle(m: dict[str, Any]) -> dict[str, Any]:
         "volume": float(m["v"]),
         "is_closed": True, # Massive AM messages are closed 1m bars
     }
+
+
+def _merge_candle_lists(*lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge candle lists by timestamp, preferring later lists on collisions."""
+    merged: dict[int, dict[str, Any]] = {}
+    for candles in lists:
+        for candle in candles:
+            ts = int(candle.get("time", 0))
+            merged[ts] = candle
+    return [merged[ts] for ts in sorted(merged.keys())]
 
 
 async def _fetch_massive_range(
@@ -137,8 +148,17 @@ async def bootstrap_forex_symbol(symbol: str) -> None:
         })
     
     if candles:
-        await set_candles(symbol, "15m", candles)
-        logger.info("[MASSIVE_BOOTSTRAP] %s: %d historical candles loaded", symbol, len(candles))
+        existing = await get_candles(symbol, _FOREX_INTERVAL, limit=1000)
+        merged = _merge_candle_lists(existing, candles)
+        if len(merged) > 1000:
+            merged = merged[-1000:]
+        await set_candles(symbol, _FOREX_INTERVAL, merged)
+        logger.info(
+            "[MASSIVE_BOOTSTRAP] %s: loaded=%d merged_total=%d",
+            symbol,
+            len(candles),
+            len(merged),
+        )
     else:
         logger.warning("[MASSIVE_BOOTSTRAP] %s: No candles found in range", symbol)
 
@@ -167,8 +187,10 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
     while True:
         try:
             # If startup bootstrap was rate limited, recover lazily on the first successful poll.
-            if not await get_candles(symbol, "15m", limit=1):
+            existing = await get_candles(symbol, _FOREX_INTERVAL, limit=1000)
+            if not existing:
                 await bootstrap_forex_symbol(symbol)
+                existing = await get_candles(symbol, _FOREX_INTERVAL, limit=1000)
 
             # Fetch the latest closed 15m candle only once per 15m boundary.
             results = await _fetch_massive_range(
@@ -179,8 +201,17 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
             )
             if results:
                 newest = results[0] # desc = newest is first element
+                latest_store_ts = int(existing[-1].get("time", 0)) if existing else 0
+                newest_ts = int(newest["t"]) // 1000
+                if latest_store_ts and newest_ts < latest_store_ts:
+                    logger.warning(
+                        "[MASSIVE_REST_POLLER] %s returned stale candle ts=%s < store ts=%s",
+                        symbol,
+                        newest_ts,
+                        latest_store_ts,
+                    )
                 msg = {
-                    "time": int(newest["t"]) // 1000,
+                    "time": newest_ts,
                     "open": float(newest["o"]),
                     "high": float(newest["h"]),
                     "low": float(newest["l"]),
@@ -189,9 +220,9 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
                     "is_closed": True,
                 }
 
-                await broadcast_candle_proposal(symbol, "15m", msg)
-                await append_candle(symbol, "15m", msg)
-                await broadcast_candle(symbol, "15m", msg)
+                await broadcast_candle_proposal(symbol, _FOREX_INTERVAL, msg)
+                await append_candle(symbol, _FOREX_INTERVAL, msg)
+                await broadcast_candle(symbol, _FOREX_INTERVAL, msg)
                     
         except Exception as e:
             logger.warning("[MASSIVE_REST_POLLER] Polling error (%s): %s", symbol, e)
