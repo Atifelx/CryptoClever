@@ -43,47 +43,30 @@ async def bootstrap_forex_symbol(symbol: str) -> None:
     from_str = start_date.strftime("%Y-%m-%d")
     to_str = end_date.strftime("%Y-%m-%d")
     
+    # Use limit=50000 to fetch ALL candles in ONE request, avoiding the 429 pagination loop.
     url = f"{MASSIVE_REST_BASE}/v2/aggs/ticker/{symbol}/range/15/minute/{from_str}/{to_str}"
-    params = {"apiKey": MASSIVE_API_KEY, "limit": 1000, "adjusted": "true", "sort": "asc"}
+    params = {"apiKey": MASSIVE_API_KEY, "limit": 50000, "adjusted": "true", "sort": "desc"}
     
     logger.info("[MASSIVE_BOOTSTRAP] Fetching %s history from %s", symbol, from_str)
     all_results = []
     
-    # Follow next_url pagination until we get 1000 candles
-    while url and len(all_results) < 1000:
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                async with httpx.AsyncClient() as client:
-                    r = await client.get(url, params=params, timeout=20.0)
-                    if r.status_code == 429:
-                        wait_time = (attempt + 1) * 15 # Wait 15s, 30s, 45s
-                        logger.warning("[MASSIVE_BOOTSTRAP] Rate limit (429) for %s. Retrying in %ds...", symbol, wait_time)
-                        await asyncio.sleep(wait_time)
-                        continue
-                    r.raise_for_status()
-                    data = r.json()
-                    results = data.get("results", [])
-                    all_results.extend(results)
-                    
-                    next_url = data.get("next_url")
-                    if next_url and len(all_results) < 1000:
-                        url = next_url + "&apiKey=" + MASSIVE_API_KEY
-                        params = {} # Clear params since they are embedded in next_url
-                    else:
-                        url = None
-                    break # Success
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    logger.warning("[MASSIVE_BOOTSTRAP] %s failed after %d attempts: %s", symbol, max_retries, e)
-                    url = None
-                    break
-                await asyncio.sleep(5)
-        else:
-            url = None # Failed after retries
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, params=params, timeout=20.0)
+            if r.status_code == 429:
+                logger.warning("[MASSIVE_BOOTSTRAP] Rate limit (429) for %s. Backend may be rate limited.", symbol)
+                return
+            r.raise_for_status()
+            data = r.json()
+            all_results = data.get("results", [])
+    except Exception as e:
+        logger.warning("[MASSIVE_BOOTSTRAP] %s failed fetching history: %s", symbol, e)
+        return
 
-    # Keep only the most recent 1000 if we overfetched
-    all_results = all_results[-1000:]
+    # Keep only exactly the most recent 1000 items (they are sorted desc)
+    all_results = all_results[:1000]
+    # Reverse back to asc (oldest first) so indicators process sequentially
+    all_results.reverse()
     
     candles = []
     for res in all_results:
@@ -127,16 +110,16 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
 
     while True:
         try:
-            # Fetch latest 1m candle (past 2 days range to be safe over weekends)
+            # Fetch latest 15m candle (past 2 days range to be safe over weekends)
             now = datetime.now()
             start = now - timedelta(days=2)
             from_str = start.strftime("%Y-%m-%d")
             to_str = now.strftime("%Y-%m-%d")
             
-            url = f"{MASSIVE_REST_BASE}/v2/aggs/ticker/{symbol}/range/1/minute/{from_str}/{to_str}"
+            url = f"{MASSIVE_REST_BASE}/v2/aggs/ticker/{symbol}/range/15/minute/{from_str}/{to_str}"
             params = {
                 "apiKey": MASSIVE_API_KEY, 
-                "limit": 3, 
+                "limit": 1, 
                 "adjusted": "true",
                 "sort": "desc" # Get newest first
             }
@@ -148,17 +131,26 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
                     results = data.get("results", [])
                     if results:
                         newest = results[0] # desc = newest is first element
-                        # Reformat for the aggregation function
+                        # Reformat for the aggregation function directly
                         msg = {
-                            "s": int(newest["t"]),
-                            "o": float(newest["o"]),
-                            "h": float(newest["h"]),
-                            "l": float(newest["l"]),
-                            "c": float(newest["c"]),
-                            "v": float(newest["v"])
+                            "time": int(newest["t"]) // 1000,
+                            "open": float(newest["o"]),
+                            "high": float(newest["h"]),
+                            "low": float(newest["l"]),
+                            "close": float(newest["c"]),
+                            "volume": float(newest["v"]),
+                            "is_closed": False # Treat it as the live updating candle
                         }
-                        # Pass to aggregator (handles building 15m candle & broadcasting)
-                        await _handle_minute_aggregate(symbol, msg)
+                        
+                        # We bypassed _handle_minute_aggregate since we're pulling 15m directly!
+                        # Send live proposal update
+                        await broadcast_candle_proposal(symbol, "15m", msg)
+                        
+                        # Append to store so historical charts include it immediately
+                        msg["is_closed"] = True 
+                        await append_candle(symbol, "15m", msg)
+                        await broadcast_candle(symbol, "15m", msg)
+                        
                 elif r.status_code == 429:
                     logger.debug("[MASSIVE_REST_POLLER] Rate limit hit for %s, skipping cycle", symbol)
                 else:
@@ -167,71 +159,7 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
         except Exception as e:
             logger.warning("[MASSIVE_REST_POLLER] Polling error (%s): %s", symbol, e)
         
-        # Poll every 15-20 seconds to provide near-live updates without hitting standard API limits
-        await asyncio.sleep(20)
+        # Paced at 60 seconds. 3 symbols * 1 req/min = 3 total calls/min. 
+        # Safely under the Polygon Free Tier limit of 5.
+        await asyncio.sleep(60)
 
-async def _handle_minute_aggregate(symbol: str, msg: dict[str, Any]) -> None:
-    """Aggregate 1m Massive bars into 15m candles and broadcast."""
-    ts_ms = msg["s"]
-    ts_sec = ts_ms // 1000
-    
-    # 15m alignment
-    period = 15 * 60
-    candle_ts = (ts_sec // period) * period
-    
-    if symbol not in _partial_candles:
-        _partial_candles[symbol] = {
-            "time": candle_ts,
-            "open": float(msg["o"]),
-            "high": float(msg["h"]),
-            "low": float(msg["l"]),
-            "close": float(msg["c"]),
-            "volume": float(msg["v"]),
-            "last_ms": ts_ms
-        }
-    else:
-        curr = _partial_candles[symbol]
-        # If new time bucket, finalize and start new
-        if candle_ts > curr["time"]:
-            # Finalize old candle (is_closed = True)
-            final_candle = {
-                "time": curr["time"],
-                "open": curr["open"],
-                "high": curr["high"],
-                "low": curr["low"],
-                "close": curr["close"],
-                "volume": curr["volume"],
-                "is_closed": True
-            }
-            await append_candle(symbol, "15m", final_candle)
-            await broadcast_candle(symbol, "15m", final_candle)
-            
-            # Start new candle
-            _partial_candles[symbol] = {
-                "time": candle_ts,
-                "open": float(msg["o"]),
-                "high": float(msg["h"]),
-                "low": float(msg["l"]),
-                "close": float(msg["c"]),
-                "volume": float(msg["v"]),
-                "last_ms": ts_ms
-            }
-        else:
-            # Update existing candle (is_closed = False for broadcast)
-            curr["high"] = max(curr["high"], float(msg["h"]))
-            curr["low"] = min(curr["low"], float(msg["l"]))
-            curr["close"] = float(msg["c"])
-            curr["volume"] += float(msg["v"])
-            curr["last_ms"] = ts_ms
-            
-            # Send live proposal update
-            live_candle = {
-                "time": curr["time"],
-                "open": curr["open"],
-                "high": curr["high"],
-                "low": curr["low"],
-                "close": curr["close"],
-                "volume": curr["volume"],
-                "is_closed": False
-            }
-            await broadcast_candle_proposal(symbol, "15m", live_candle)
