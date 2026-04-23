@@ -42,12 +42,18 @@ export default function FMCBROverlay({
       return;
     }
     
-    // Only render price lines if status is READY (has levels)
-    if (signal.status !== 'READY' || !signal.levels || signal.levels.length === 0) {
+    if (!signal.levels || signal.levels.length === 0) {
       return;
     }
 
     const { levels, direction, breakType, cb1 } = signal;
+    const visibleLevels = signal.status === 'READY'
+      ? levels
+      : levels.filter(level => level.type === 'support' || level.type === 'resistance');
+
+    if (visibleLevels.length === 0) {
+      return;
+    }
 
     // Dotted lines: green = bullish (price could go up), red = bearish (price could go down)
     const colors = {
@@ -68,7 +74,7 @@ export default function FMCBROverlay({
     const scheme = direction === 'BULLISH' ? colors.bullish : colors.bearish;
 
     // Render all levels: Base/Setup = solid; Entry/TP = dotted (green bullish / red bearish)
-    levels.forEach(level => {
+    visibleLevels.forEach(level => {
       let color = '#888888';
       let lineWidth: LineWidth = 1;
       let lineStyle: 0 | 1 | 2 = 1; // 0=Solid, 1=Dotted, 2=Dashed
@@ -93,6 +99,16 @@ export default function FMCBROverlay({
         color = scheme.tp;
         lineWidth = 2;
         lineStyle = 1; // Dotted — target levels
+        title = level.label;
+      } else if (level.type === 'support') {
+        color = '#4ade80';
+        lineWidth = 1;
+        lineStyle = 2;
+        title = level.label;
+      } else if (level.type === 'resistance') {
+        color = '#f87171';
+        lineWidth = 1;
+        lineStyle = 2;
         title = level.label;
       }
 

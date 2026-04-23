@@ -281,10 +281,10 @@ export default function UnifiedMarkerManager({
           : `FMCBR: ${fmcbrSignal.status}${breakType ? ` (${breakType})` : ''}${cb1 ? ' CB1✓' : ''}`;
         allMarkers.push({
           time: referenceTime as any,
-          position: direction === 'BEARISH' ? 'aboveBar' : 'belowBar',
+          position: 'belowBar',
           color: statusColor,
           shape: 'circle',
-          size: 2.5,
+          size: 1.8,
           text: statusText,
         });
 
@@ -293,10 +293,10 @@ export default function UnifiedMarkerManager({
           const isUp = direction === 'BULLISH';
           allMarkers.push({
             time: referenceTime as any,
-            position: isUp ? 'belowBar' : 'aboveBar',
+            position: 'belowBar',
             color: isUp ? '#80ffbb' : '#ff9999',
             shape: isUp ? 'arrowUp' : 'arrowDown',
-            size: 2.0,
+            size: 1.4,
             text: isUp ? 'FMCBR LONG' : 'FMCBR SHORT',
           });
         }

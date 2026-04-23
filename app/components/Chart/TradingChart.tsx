@@ -12,7 +12,7 @@ import { generateScalpSignal, getScalpDisplayItems } from '../../lib/indicators/
 import type { ScalpDisplayItem } from '../../lib/indicators/scalpSignal';
 import { getTrendDisplayItem } from '../../lib/indicators/trendIndicator';
 import type { TrendMarker } from '../../lib/indicators/trendIndicator';
-import { calculateFMCBR } from '../../lib/indicators/fmcbr';
+import { calculateFMCBR, getFMCBRRequiredCandles } from '../../lib/indicators/fmcbr';
 import type { FMCBRSignal } from '../../lib/indicators/fmcbr';
 import UnifiedMarkerManager from './UnifiedMarkerManager';
 import FMCBROverlay from './FMCBROverlay';
@@ -201,10 +201,10 @@ export default function TradingChart({
   const fmcbrSignal = useMemo((): FMCBRSignal | null => {
     if (typeof window === 'undefined') return null;
     const closedCandles = candles.slice(0, candles.length - 1);
-    // Require enough data; do NOT block on isLoading so FMCBR can show as soon as candles exist
-    if (closedCandles.length < 200) {
+    const requiredCandles = getFMCBRRequiredCandles(closedCandles);
+    if (closedCandles.length < requiredCandles) {
       if (process.env.NODE_ENV === 'development' && closedCandles.length > 0) {
-        console.log('[FMCBR] Waiting for more candles:', closedCandles.length, '/ 200');
+        console.log('[FMCBR] Waiting for more candles:', closedCandles.length, '/', requiredCandles);
       }
       return null;
     }
