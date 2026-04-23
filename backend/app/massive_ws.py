@@ -37,43 +37,56 @@ def _massive_to_candle(m: dict[str, Any]) -> dict[str, Any]:
 
 async def bootstrap_forex_symbol(symbol: str) -> None:
     """Fetch last 1000 15m aggregates from Massive REST and write to Redis."""
-    # Polygon/Massive format: /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to}
-    # For 1000 15m candles, we need ~15 days of data.
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=20)
+    start_date = end_date - timedelta(days=30)
     
     from_str = start_date.strftime("%Y-%m-%d")
     to_str = end_date.strftime("%Y-%m-%d")
     
     url = f"{MASSIVE_REST_BASE}/v2/aggs/ticker/{symbol}/range/15/minute/{from_str}/{to_str}"
-    params = {"apiKey": MASSIVE_API_KEY, "limit": 1000, "adjusted": "true"}
+    params = {"apiKey": MASSIVE_API_KEY, "limit": 1000, "adjusted": "true", "sort": "asc"}
     
-    logger.info("[MASSIVE_BOOTSTRAP] Fetching %s history from %s to %s", symbol, from_str, to_str)
+    logger.info("[MASSIVE_BOOTSTRAP] Fetching %s history from %s", symbol, from_str)
+    all_results = []
     
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(url, params=params, timeout=20.0)
-                if r.status_code == 429:
-                    wait_time = (attempt + 1) * 15 # Wait 15s, 30s, 45s
-                    logger.warning("[MASSIVE_BOOTSTRAP] Rate limit (429) for %s. Retrying in %ds...", symbol, wait_time)
-                    await asyncio.sleep(wait_time)
-                    continue
-                r.raise_for_status()
-                data = r.json()
-                results = data.get("results", [])
-                break # Success
-        except Exception as e:
-            if attempt == max_retries - 1:
-                logger.warning("[MASSIVE_BOOTSTRAP] %s failed after %d attempts: %s", symbol, max_retries, e)
-                return
-            await asyncio.sleep(5)
-    else:
-        return # Failed after retries
+    # Follow next_url pagination until we get 1000 candles
+    while url and len(all_results) < 1000:
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(url, params=params, timeout=20.0)
+                    if r.status_code == 429:
+                        wait_time = (attempt + 1) * 15 # Wait 15s, 30s, 45s
+                        logger.warning("[MASSIVE_BOOTSTRAP] Rate limit (429) for %s. Retrying in %ds...", symbol, wait_time)
+                        await asyncio.sleep(wait_time)
+                        continue
+                    r.raise_for_status()
+                    data = r.json()
+                    results = data.get("results", [])
+                    all_results.extend(results)
+                    
+                    next_url = data.get("next_url")
+                    if next_url and len(all_results) < 1000:
+                        url = next_url + "&apiKey=" + MASSIVE_API_KEY
+                        params = {} # Clear params since they are embedded in next_url
+                    else:
+                        url = None
+                    break # Success
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.warning("[MASSIVE_BOOTSTRAP] %s failed after %d attempts: %s", symbol, max_retries, e)
+                    url = None
+                    break
+                await asyncio.sleep(5)
+        else:
+            url = None # Failed after retries
 
+    # Keep only the most recent 1000 if we overfetched
+    all_results = all_results[-1000:]
+    
     candles = []
-    for res in results:
+    for res in all_results:
         candles.append({
             "time": int(res["t"]) // 1000,
             "open": float(res["o"]),
@@ -81,11 +94,12 @@ async def bootstrap_forex_symbol(symbol: str) -> None:
             "low": float(res["l"]),
             "close": float(res["c"]),
             "volume": float(res["v"]),
+            "is_closed": True, # CRITICAL: explicitly set for indicators (Semafor) to accept it
         })
     
     if candles:
         await set_candles(symbol, "15m", candles)
-        logger.info("[MASSIVE_BOOTSTRAP] %s: %d candles loaded", symbol, len(candles))
+        logger.info("[MASSIVE_BOOTSTRAP] %s: %d historical candles loaded", symbol, len(candles))
     else:
         logger.warning("[MASSIVE_BOOTSTRAP] %s: No candles found in range", symbol)
 
@@ -95,7 +109,7 @@ async def bootstrap_all_forex() -> None:
         logger.warning("[MASSIVE_BOOTSTRAP] No API key found. Skipping.")
         return
     logger.info("[MASSIVE_BOOTSTRAP] Starting for %s", FOREX_SYMBOLS)
-    # Sequential bootstrap to avoid 429 Rate Limit (Common on Massive/Polygon Free keys)
+    # Sequential bootstrap to avoid 429 Rate Limit
     for sym in FOREX_SYMBOLS:
         try:
             await bootstrap_forex_symbol(sym)
@@ -103,56 +117,58 @@ async def bootstrap_all_forex() -> None:
         except Exception as e:
             logger.error("[MASSIVE_BOOTSTRAP] Error in sequence for %s: %s", sym, e)
 
-
 async def run_massive_ws_for_symbol(symbol: str) -> None:
-    """Connect to Massive Forex WebSocket, authenticate, and stream 15m aggregates."""
+    """Fallback REST Poller since Massive Free Tier denies WS access for Forex."""
     if not MASSIVE_API_KEY:
-        logger.error("[MASSIVE_WS] No API key for %s", symbol)
+        logger.error("[MASSIVE_REST_POLLER] No API key for %s", symbol)
         return
 
-    url = MASSIVE_WS_BASE 
-    logger.info("[MASSIVE_WS] Connecting to %s for %s", url, symbol)
+    logger.info("[MASSIVE_REST_POLLER] Starting fallback poller for %s", symbol)
 
     while True:
         try:
-            async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
-                # 1. Authenticate
-                auth_msg = {"action": "auth", "params": MASSIVE_API_KEY}
-                await ws.send(json.dumps(auth_msg))
-                
-                # 2. Wait for auth success
-                resp = await ws.recv()
-                auth_resp = json.loads(resp)
-                if isinstance(auth_resp, list): auth_resp = auth_resp[0]
-                
-                if auth_resp.get("status") != "auth_success":
-                    logger.error("[MASSIVE_WS] Auth failed for %s: %s", symbol, auth_resp)
-                    await asyncio.sleep(10)
-                    continue
-                
-                logger.info("[MASSIVE_WS] Auth success for %s", symbol)
-                
-                # 3. Subscribe to 1m aggregates (we will aggregate to 15m)
-                # Format: AM.C:EURUSD
-                sub_msg = {"action": "subscribe", "params": f"AM.{symbol}"}
-                await ws.send(json.dumps(sub_msg))
-                
-                # 4. Stream data
-                async for message in ws:
-                    try:
-                        data_list = json.loads(message)
-                        if not isinstance(data_list, list): data_list = [data_list]
-                        
-                        for msg in data_list:
-                            if msg.get("ev") == "AM":
-                                await _handle_minute_aggregate(symbol, msg)
-                            elif msg.get("ev") == "status":
-                                logger.info("[MASSIVE_WS] Status (%s): %s", symbol, msg.get("message"))
-                    except Exception as e:
-                        logger.error("[MASSIVE_WS] Parse error (%s): %s", symbol, e)
+            # Fetch latest 1m candle (past 2 days range to be safe over weekends)
+            now = datetime.now()
+            start = now - timedelta(days=2)
+            from_str = start.strftime("%Y-%m-%d")
+            to_str = now.strftime("%Y-%m-%d")
+            
+            url = f"{MASSIVE_REST_BASE}/v2/aggs/ticker/{symbol}/range/1/minute/{from_str}/{to_str}"
+            params = {
+                "apiKey": MASSIVE_API_KEY, 
+                "limit": 3, 
+                "adjusted": "true",
+                "sort": "desc" # Get newest first
+            }
+            
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, params=params, timeout=10.0)
+                if r.status_code == 200:
+                    data = r.json()
+                    results = data.get("results", [])
+                    if results:
+                        newest = results[0] # desc = newest is first element
+                        # Reformat for the aggregation function
+                        msg = {
+                            "s": int(newest["t"]),
+                            "o": float(newest["o"]),
+                            "h": float(newest["h"]),
+                            "l": float(newest["l"]),
+                            "c": float(newest["c"]),
+                            "v": float(newest["v"])
+                        }
+                        # Pass to aggregator (handles building 15m candle & broadcasting)
+                        await _handle_minute_aggregate(symbol, msg)
+                elif r.status_code == 429:
+                    logger.debug("[MASSIVE_REST_POLLER] Rate limit hit for %s, skipping cycle", symbol)
+                else:
+                    logger.debug("[MASSIVE_REST_POLLER] API error %s: %s", r.status_code, r.text)
+                    
         except Exception as e:
-            logger.warning("[MASSIVE_WS] Connection error (%s): %s; reconnecting...", symbol, e)
-            await asyncio.sleep(5)
+            logger.warning("[MASSIVE_REST_POLLER] Polling error (%s): %s", symbol, e)
+        
+        # Poll every 15-20 seconds to provide near-live updates without hitting standard API limits
+        await asyncio.sleep(20)
 
 async def _handle_minute_aggregate(symbol: str, msg: dict[str, Any]) -> None:
     """Aggregate 1m Massive bars into 15m candles and broadcast."""
