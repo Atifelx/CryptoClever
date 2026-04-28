@@ -13,16 +13,17 @@ interface FMCBRArrowOverlayProps {
 }
 
 interface ArrowLayout {
-  x: number;
-  yStart: number;
-  yEnd: number;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
   direction: 'BULLISH' | 'BEARISH';
 }
 
 /**
- * FMCBR Arrow Overlay
- * Renders a large, glowing, transparent arrow indicating momentum and target range.
- * Replaces the cluttered horizontal Fibonacci lines.
+ * FMCBR Arrow Overlay (V2 - Diagonal Momentum Arrow)
+ * Renders a large, diagonal glowing arrow as per user request (how.png).
+ * Points from the breakout/signal point towards the expected target.
  */
 export default function FMCBRArrowOverlay({
   chart,
@@ -39,7 +40,8 @@ export default function FMCBRArrowOverlay({
       return;
     }
 
-    if (!signal.direction || (signal.status !== 'READY' && signal.status !== 'WAITING_RETEST')) {
+    // Allow all signal statuses that have a direction
+    if (!signal.direction || !signal.status) {
       setLayout(null);
       return;
     }
@@ -53,38 +55,43 @@ export default function FMCBRArrowOverlay({
         return;
       }
 
-      const x = timeScale.timeToCoordinate(signalTime as Time);
-      
-      // Calculate vertical range: from Base to TP3 Extended
-      const baseLevel = signal.base;
-      const tp3ExtLevel = signal.levels.find(l => l.level === 'TP3 Extended')?.price || signal.levels.find(l => l.type === 'tp')?.price || signal.base;
-      
-      const yStart = candleSeries.priceToCoordinate(baseLevel);
-      const yEnd = candleSeries.priceToCoordinate(tp3ExtLevel);
-
-      if (
-        x === null ||
-        yStart === null ||
-        yEnd === null ||
-        Number.isNaN(x) ||
-        Number.isNaN(yStart) ||
-        Number.isNaN(yEnd)
-      ) {
+      const startX = timeScale.timeToCoordinate(signalTime as Time);
+      if (startX === null || Number.isNaN(startX)) {
         setLayout(null);
         return;
       }
 
+      // Calculate vertical range: from Base/Setup to TP1 or TP3
+      const isUp = signal.direction === 'BULLISH';
+      const startPrice = isUp ? signal.swingLow : signal.swingHigh;
+      
+      // Target price: use TP1 or TP3 depending on what's available
+      const tpLevel = signal.levels.find(l => l.level === 'TP1')?.price || 
+                      signal.levels.find(l => l.level === 'TP3')?.price || 
+                      (isUp ? signal.swingHigh * 1.02 : signal.swingLow * 0.98);
+      
+      const startY = candleSeries.priceToCoordinate(startPrice);
+      const endY = candleSeries.priceToCoordinate(tpLevel);
+
+      if (startY === null || endY === null || Number.isNaN(startY) || Number.isNaN(endY)) {
+        setLayout(null);
+        return;
+      }
+
+      // Diagonal offset: point the arrow 60 pixels to the right
+      const endX = startX + 60;
+
       setLayout({
-        x,
-        yStart,
-        yEnd,
+        startX,
+        startY,
+        endX,
+        endY,
         direction: signal.direction as 'BULLISH' | 'BEARISH',
       });
     };
 
     updateLayout();
     
-    // Update more frequently to keep up with pan/zoom
     const interval = window.setInterval(updateLayout, 100);
     const onResize = () => updateLayout();
     window.addEventListener('resize', onResize);
@@ -99,83 +106,79 @@ export default function FMCBRArrowOverlay({
     return null;
   }
 
-  const isUp = layout.direction === 'BULLISH';
-  const height = Math.abs(layout.yStart - layout.yEnd);
-  const arrowWidth = 40;
-  const glowColor = isUp ? 'rgba(0, 255, 102, 0.4)' : 'rgba(255, 34, 34, 0.4)';
-  const mainColor = isUp ? 'rgba(0, 255, 102, 0.25)' : 'rgba(255, 34, 34, 0.25)';
-  const accentColor = isUp ? '#00ff66' : '#ff2222';
+  const { startX, startY, endX, endY, direction } = layout;
+  const isUp = direction === 'BULLISH';
+  
+  // SVG ViewBox math
+  const minX = Math.min(startX, endX) - 20;
+  const maxX = Math.max(startX, endX) + 20;
+  const minY = Math.min(startY, endY) - 20;
+  const maxY = Math.max(startY, endY) + 20;
+  
+  const width = maxX - minX;
+  const height = maxY - minY;
 
-  // Position arrow slightly to the left of the signal candle if it's too close to the right edge
-  // but usually we just center it on the candle time.
-  const leftPos = layout.x - (arrowWidth / 2);
-  const topPos = Math.min(layout.yStart, layout.yEnd);
+  const accentColor = isUp ? '#00ffcc' : '#ff3366';
+  const glowColor = isUp ? 'rgba(0, 255, 204, 0.5)' : 'rgba(255, 51, 102, 0.5)';
+
+  // Arrowhead math
+  const angle = Math.atan2(endY - startY, endX - startX);
+  const headSize = 18;
+  const x1 = endX - headSize * Math.cos(angle - Math.PI / 6);
+  const y1 = endY - headSize * Math.sin(angle - Math.PI / 6);
+  const x2 = endX - headSize * Math.cos(angle + Math.PI / 6);
+  const y2 = endY - headSize * Math.sin(angle + Math.PI / 6);
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-      <div
-        className="absolute transition-all duration-300 ease-out"
-        style={{
-          left: `${leftPos}px`,
-          top: `${topPos}px`,
-          width: `${arrowWidth}px`,
-          height: `${height}px`,
-        }}
+    <div className="pointer-events-none absolute inset-0 z-20">
+      <svg
+        width="100%"
+        height="100%"
+        className="absolute inset-0 overflow-visible"
+        style={{ filter: 'drop-shadow(0 0 12px ' + glowColor + ')' }}
       >
-        {/* The Arrow SVG */}
-        <svg
-          width={arrowWidth}
-          height={height}
-          viewBox={`0 0 ${arrowWidth} ${height}`}
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
+        <defs>
+          <linearGradient id={`grad-${direction}`} x1={startX} y1={startY} x2={endX} y2={endY} gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor={accentColor} stopOpacity="0.1" />
+            <stop offset="100%" stopColor={accentColor} stopOpacity="0.9" />
+          </linearGradient>
+        </defs>
+
+        {/* The Arrow Line */}
+        <line
+          x1={startX}
+          y1={startY}
+          x2={endX}
+          y2={endY}
+          stroke={`url(#grad-${direction})`}
+          strokeWidth="6"
+          strokeLinecap="round"
           className="animate-pulse"
-        >
-          <defs>
-            <linearGradient id={`arrowGradient-${layout.direction}`} x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor={isUp ? accentColor : mainColor} stopOpacity={isUp ? 0.8 : 0.4} />
-              <stop offset="100%" stopColor={isUp ? mainColor : accentColor} stopOpacity={isUp ? 0.4 : 0.8} />
-            </linearGradient>
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="4" result="coloredBlur" />
-              <feMerge>
-                <feMergeNode in="coloredBlur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          
-          {/* Arrow Body */}
-          {isUp ? (
-            <path
-              d={`M ${arrowWidth/2} 0 L ${arrowWidth} ${arrowWidth/2} L ${arrowWidth*0.75} ${arrowWidth/2} L ${arrowWidth*0.75} ${height} L ${arrowWidth*0.25} ${height} L ${arrowWidth*0.25} ${arrowWidth/2} L 0 ${arrowWidth/2} Z`}
-              fill={`url(#arrowGradient-${layout.direction})`}
-              filter="url(#glow)"
-              style={{ opacity: 0.7 }}
-            />
-          ) : (
-            <path
-              d={`M ${arrowWidth*0.25} 0 L ${arrowWidth*0.75} 0 L ${arrowWidth*0.75} ${height - arrowWidth/2} L ${arrowWidth} ${height - arrowWidth/2} L ${arrowWidth/2} ${height} L 0 ${height - arrowWidth/2} L ${arrowWidth*0.25} ${height - arrowWidth/2} Z`}
-              fill={`url(#arrowGradient-${layout.direction})`}
-              filter="url(#glow)"
-              style={{ opacity: 0.7 }}
-            />
-          )}
-        </svg>
-        
-        {/* Label near the arrow tip */}
-        <div 
-          className="absolute whitespace-nowrap rounded-md bg-black/60 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm"
-          style={{
-            [isUp ? 'top' : 'bottom']: '-20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            border: `1px solid ${accentColor}44`,
-          }}
-        >
-          FMCBR {isUp ? 'BULLISH' : 'BEARISH'}
-        </div>
-      </div>
+        />
+
+        {/* The Arrow Head */}
+        <path
+          d={`M ${endX} ${endY} L ${x1} ${y1} L ${x2} ${y2} Z`}
+          fill={accentColor}
+          fillOpacity="0.9"
+          className="animate-pulse"
+        />
+
+        {/* Label near the end of the arrow */}
+        <foreignObject x={endX + 10} y={endY - 10} width="150" height="40">
+          <div className="flex items-center gap-2">
+            <div 
+              className="rounded-full px-2 py-0.5 text-[11px] font-black italic tracking-tighter text-white shadow-xl backdrop-blur-md"
+              style={{ 
+                background: `linear-gradient(90deg, ${accentColor} 0%, rgba(0,0,0,0.8) 100%)`,
+                border: `1px solid ${accentColor}88`
+              }}
+            >
+              FMCBR {direction}
+            </div>
+          </div>
+        </foreignObject>
+      </svg>
     </div>
   );
 }
