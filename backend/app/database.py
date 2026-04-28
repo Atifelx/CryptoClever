@@ -16,7 +16,8 @@ from app.config import DATABASE_URL
 logger = logging.getLogger(__name__)
 
 # Use async engine (asyncpg)
-_async_url = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+# Strip query params like ?sslmode=require because asyncpg doesn't support them in the URL
+_async_url = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1).split("?")[0]
 engine = create_async_engine(_async_url, echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

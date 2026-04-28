@@ -1,4 +1,4 @@
-# Deployment triggered by Antigravity on 2026-04-28
+# Deployment triggered by Antigravity on 2026-04-28 - Port fix
 name: Deploy to Azure VM
 
 
@@ -116,7 +116,7 @@ jobs:
                 restart: unless-stopped
                 environment:
                   - NEXT_PUBLIC_BACKEND_URL=${{ secrets.NEXT_PUBLIC_BACKEND_URL }}
-                  - BACKEND_URL=http://backend:8000
+                  - BACKEND_URL=http://backend:10000
                 depends_on:
                   - backend
 
@@ -143,7 +143,7 @@ jobs:
                 restart: unless-stopped
                 environment:
                   - PORT=8010
-                  - BACKEND_MARKET_DATA_URL=http://backend:8000
+                  - BACKEND_MARKET_DATA_URL=http://backend:10000
                   - AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}
                   - AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}
                   - AZURE_OPENAI_MODEL=gpt-5.3-codex
