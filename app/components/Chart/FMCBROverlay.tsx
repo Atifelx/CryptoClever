@@ -46,6 +46,8 @@ export default function FMCBROverlay({
       return;
     }
 
+    const { levels, direction, breakType, cb1 } = signal;
+
     // User requested "avoid all horizontal line in FMCBR"
     // We only keep Support/Resistance levels if they are present, which are separate from Fibonacci levels
     const visibleLevels = levels.filter(level => level.type === 'support' || level.type === 'resistance');
