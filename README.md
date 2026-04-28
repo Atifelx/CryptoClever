@@ -20,6 +20,7 @@ A professional Next.js 14+ cryptocurrency and forex trading platform with real-t
 - **Dark Theme**: Professional MetaTrader-like UI
 - **100% Free**: Uses Binance free public API (no API keys required)
 - **Redis Caching**: Optional Redis integration for faster performance
+- **Backend AI Core Engine**: Optional backend-driven AI trade analysis with Azure OpenAI + live news/search context
 
 ## 🛠️ Tech Stack
 
@@ -75,6 +76,17 @@ If using Redis, add these in Vercel:
 - `REDIS_HOST`: Redis host (if not using URL)
 - `REDIS_PORT`: Redis port (default: 6379)
 - `REDIS_PASSWORD`: Redis password (if required)
+
+If using Azure OpenAI for backend AI Core Engine analysis, add:
+- `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI resource endpoint
+- `AZURE_OPENAI_API_KEY`: Your Azure OpenAI API key
+- `AZURE_OPENAI_MODEL`: Your deployment name, for example `gpt-5.3-codex`
+- `AZURE_OPENAI_API_VERSION`: API version, for example `2025-04-01-preview`
+
+Optional AI worker env vars:
+- `AI_ENGINE_URL`: URL of the AI worker service (for Docker Compose: `http://ai-engine:8010`)
+- `CORE_ENGINE_USE_AI`: Set `true` to let backend `/signals` call the AI worker
+- `NEWSAPI_KEY`: Optional NewsAPI key; without it the AI worker falls back to DuckDuckGo live news/search
 
 ## 📊 API Endpoints
 

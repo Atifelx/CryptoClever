@@ -1,98 +1,169 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { RefObject, useEffect, useState } from 'react';
 import { ISeriesApi, IChartApi } from 'lightweight-charts';
-import { TradingZone } from '../../lib/engine/types';
+
+interface TradingZone {
+  type: 'BUY' | 'SELL';
+  entryPrice: number;
+  profitTarget: number;
+  stopLoss: number;
+  confidence: number;
+  reasoning: string;
+  time: number;
+}
+
+interface SupportResistance {
+  supportLevels: number[];
+  resistanceLevels: number[];
+  lastSwingLow?: number | null;
+  lastSwingHigh?: number | null;
+}
 
 interface CoreEngineOverlayProps {
   chart: IChartApi | null;
   candleSeries: ISeriesApi<'Candlestick'> | null;
-  zones: TradingZone[];
+  containerRef: RefObject<HTMLDivElement>;
+  zone: TradingZone | null;
+  supportResistance?: SupportResistance | null;
+  prediction?: {
+    direction: 'BUY' | 'SELL';
+    tradeStyle: 'SCALP' | 'HOLD';
+  } | null;
+}
+
+interface OverlayLayout {
+  entryY: number;
+  supportY: number;
+  resistanceY: number;
 }
 
 export default function CoreEngineOverlay({
   chart,
   candleSeries,
-  zones,
+  containerRef,
+  zone,
+  supportResistance,
+  prediction,
 }: CoreEngineOverlayProps) {
-  const priceLinesRef = useRef<Array<{ id: string; line: any }>>([]);
+  const [layout, setLayout] = useState<OverlayLayout | null>(null);
 
   useEffect(() => {
-    if (!chart || !candleSeries || zones.length === 0) {
-      // Clear existing lines
-      priceLinesRef.current.forEach(({ line }) => {
-        try {
-          candleSeries?.removePriceLine(line);
-        } catch (e) {
-          // Ignore errors
-        }
-      });
-      priceLinesRef.current = [];
+    if (!chart || !candleSeries || !containerRef.current || !zone) {
+      setLayout(null);
       return;
     }
 
-    // Clear existing lines
-    priceLinesRef.current.forEach(({ line }) => {
-      try {
-        candleSeries.removePriceLine(line);
-      } catch (e) {
-        // Ignore errors
+    const updateLayout = () => {
+      const entryY = candleSeries.priceToCoordinate(zone.entryPrice);
+      const supportPrice = supportResistance?.lastSwingLow ?? zone.stopLoss;
+      const resistancePrice = supportResistance?.lastSwingHigh ?? zone.profitTarget;
+      const supportY = candleSeries.priceToCoordinate(supportPrice);
+      const resistanceY = candleSeries.priceToCoordinate(resistancePrice);
+
+      if (
+        entryY === null ||
+        supportY === null ||
+        resistanceY === null ||
+        Number.isNaN(entryY) ||
+        Number.isNaN(supportY) ||
+        Number.isNaN(resistanceY)
+      ) {
+        setLayout(null);
+        return;
       }
-    });
-    priceLinesRef.current = [];
 
-    // Render zones
-    zones.forEach((zone, index) => {
-      try {
-        // Entry line
-        const entryLine = candleSeries.createPriceLine({
-          price: zone.entryPrice,
-          color: zone.type === 'BUY' ? '#00ff88' : '#ff4444',
-          lineWidth: 2,
-          lineStyle: zone.type === 'BUY' ? 0 : 0, // Solid
-          axisLabelVisible: true,
-          title: `${zone.type} @ ${zone.entryPrice.toFixed(2)}`,
-        });
-        priceLinesRef.current.push({ id: `entry-${index}`, line: entryLine });
-
-        // Profit target line
-        const profitLine = candleSeries.createPriceLine({
-          price: zone.profitTarget,
-          color: zone.type === 'BUY' ? '#00ff88' : '#ff4444',
-          lineWidth: 1,
-          lineStyle: 2, // Dashed
-          axisLabelVisible: true,
-          title: `Target: ${zone.profitTarget.toFixed(2)}`,
-        });
-        priceLinesRef.current.push({ id: `profit-${index}`, line: profitLine });
-
-        // Stop loss line
-        const stopLine = candleSeries.createPriceLine({
-          price: zone.stopLoss,
-          color: '#888888',
-          lineWidth: 1,
-          lineStyle: 3, // Dotted
-          axisLabelVisible: true,
-          title: `Stop: ${zone.stopLoss.toFixed(2)}`,
-        });
-        priceLinesRef.current.push({ id: `stop-${index}`, line: stopLine });
-      } catch (error) {
-        console.warn('Error creating price line:', error);
-      }
-    });
-
-    // Cleanup function
-    return () => {
-      priceLinesRef.current.forEach(({ line }) => {
-        try {
-          candleSeries?.removePriceLine(line);
-        } catch (e) {
-          // Ignore errors
-        }
+      setLayout({
+        entryY,
+        supportY,
+        resistanceY,
       });
-      priceLinesRef.current = [];
     };
-  }, [chart, candleSeries, zones]);
 
-  return null; // This component only renders price lines
+    updateLayout();
+    const interval = window.setInterval(updateLayout, 250);
+    const onResize = () => updateLayout();
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [chart, candleSeries, containerRef, zone, supportResistance, prediction]);
+
+  if (!zone || !layout) {
+    return null;
+  }
+
+  const direction = prediction?.direction ?? zone.type;
+  const lineWidth = 132;
+  const labelRight = 12;
+  const lineRight = 104;
+  const arrowRight = 250;
+  const supportPrice = supportResistance?.lastSwingLow ?? zone.stopLoss;
+  const resistancePrice = supportResistance?.lastSwingHigh ?? zone.profitTarget;
+
+  const shortLines = [
+    {
+      key: 'resistance',
+      y: layout.resistanceY,
+      color: 'rgba(255, 120, 120, 0.9)',
+      label: `R ${resistancePrice.toFixed(2)}`,
+    },
+    {
+      key: 'support',
+      y: layout.supportY,
+      color: 'rgba(80, 220, 160, 0.9)',
+      label: `S ${supportPrice.toFixed(2)}`,
+    },
+  ];
+
+  const arrowClass = direction === 'BUY'
+    ? 'border-l-[7px] border-r-[7px] border-b-[12px] border-l-transparent border-r-transparent border-b-yellow-400'
+    : 'border-l-[7px] border-r-[7px] border-t-[12px] border-l-transparent border-r-transparent border-t-yellow-400';
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10">
+      {shortLines.map((line) => (
+        <div key={line.key}>
+          <div
+            className="absolute rounded-full"
+            style={{
+              top: `${line.y}px`,
+              right: `${lineRight}px`,
+              width: `${lineWidth}px`,
+              height: '2px',
+              backgroundColor: line.color,
+              transform: 'translateY(-1px)',
+              boxShadow: `0 0 12px ${line.color}`,
+            }}
+          />
+          <div
+            className="absolute rounded-md border border-gray-700/80 bg-[#101010]/90 px-2 py-0.5 text-[10px] font-semibold text-gray-200"
+            style={{
+              top: `${line.y}px`,
+              right: `${labelRight}px`,
+              transform: 'translateY(-50%)',
+            }}
+          >
+            {line.label}
+          </div>
+        </div>
+      ))}
+
+      <div
+        className="absolute flex items-center gap-2"
+        style={{
+          top: `${layout.entryY}px`,
+          right: `${arrowRight}px`,
+          transform: 'translateY(-50%)',
+        }}
+      >
+        <div className={arrowClass} />
+        <div className="rounded-full border border-yellow-500/40 bg-[#111]/85 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-yellow-300">
+          {direction}
+        </div>
+      </div>
+    </div>
+  );
 }

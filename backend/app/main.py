@@ -11,7 +11,15 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from app.binance_ws import bootstrap_all, get_stream_status, run_binance_ws_for_symbol
 from app.twelvedata_ws import bootstrap_all_forex, run_twelvedata_poll_for_symbol
-from app.config import INTERVALS, SYMBOLS, CRYPTO_SYMBOLS, FOREX_SYMBOLS
+from app.config import (
+    AI_ENGINE_TIMEOUT_SECONDS,
+    AI_ENGINE_URL,
+    CORE_ENGINE_USE_AI,
+    INTERVALS,
+    SYMBOLS,
+    CRYPTO_SYMBOLS,
+    FOREX_SYMBOLS,
+)
 from app.redis_store import get_candles, get_signals, set_signals, close_redis, get_last_append_time, append_candle, get_store_keys_info
 from app.utils import build_candle_key, normalize_interval, normalize_symbol
 from app.indicators import compute_signals
@@ -1150,6 +1158,22 @@ async def signals(symbol: str, interval: str):
     cached = await get_signals(symbol, interval)
     if cached:
         return cached
+    if CORE_ENGINE_USE_AI and AI_ENGINE_URL:
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=AI_ENGINE_TIMEOUT_SECONDS) as client:
+                response = await client.get(
+                    f"{AI_ENGINE_URL.rstrip('/')}/analyze/{symbol}/{interval}",
+                    params={"limit": 300},
+                )
+            if response.is_success:
+                result = response.json()
+                await set_signals(symbol, interval, result)
+                return result
+            logger.warning("AI engine returned %s for %s/%s: %s", response.status_code, symbol, interval, response.text[:300])
+        except Exception as exc:
+            logger.warning("AI engine unavailable for %s/%s, falling back: %s", symbol, interval, exc)
     candles_data = await get_candles(symbol, interval, limit=500)
     if not candles_data or len(candles_data) < 20:
         raise HTTPException(status_code=404, detail="Insufficient candles for signals.")

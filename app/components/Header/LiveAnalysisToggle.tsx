@@ -14,11 +14,34 @@ interface TradingZone {
   time: number;
 }
 
+interface PredictionResult {
+  direction: 'BUY' | 'SELL';
+  tradeStyle: 'SCALP' | 'HOLD';
+  confidence: number;
+  summary: string;
+  reasoning: string;
+  horizon: string;
+  currentPrice: number;
+  targetPrice: number;
+  stopLoss: number;
+  chartLabel: string;
+  expectedPath: string;
+  newsBias: string;
+}
+
+interface SupportResistance {
+  supportLevels: number[];
+  resistanceLevels: number[];
+  lastSwingLow?: number | null;
+  lastSwingHigh?: number | null;
+}
+
 interface AnalysisResult {
   structure: string;
   regime: string;
   impulseScore: number;
   confidence: number;
+  trend?: string;
   pivots: Array<{
     type: string;
     price: number;
@@ -27,6 +50,10 @@ interface AnalysisResult {
   }>;
   reasoning?: string;
   zones?: TradingZone[];
+  prediction?: PredictionResult;
+  supportResistance?: SupportResistance;
+  aiPowered?: boolean;
+  analysisSource?: string;
   cached?: boolean;
   symbol?: string;
   timeframe?: string;
@@ -40,7 +67,6 @@ export default function LiveAnalysisToggle() {
   const [loading, setLoading] = useState(false);
   const previousStructureRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lockedZonesRef = useRef<Map<string, TradingZone>>(new Map()); // Track locked zones by time+type
   const prevSymbolRef = useRef<string>(selectedSymbol);
   const prevTimeframeRef = useRef<string>(selectedTimeframe);
 
@@ -55,7 +81,6 @@ export default function LiveAnalysisToggle() {
       // Clear all state immediately
       setAnalysis(null);
       previousStructureRef.current = null;
-      lockedZonesRef.current.clear();
       setCoreEngineAnalysis(null);
       
       prevSymbolRef.current = selectedSymbol;
@@ -63,113 +88,38 @@ export default function LiveAnalysisToggle() {
     }
   }, [selectedSymbol, selectedTimeframe, setCoreEngineAnalysis]);
 
-  // Fetch analysis from API (try backend signals first when backend is configured, else deep-analysis)
+  // Fetch analysis from backend; frontend only renders the returned payload.
   const fetchAnalysis = async () => {
     if (!selectedSymbol || !selectedTimeframe) return;
 
     setLoading(true);
     try {
       const timeframe = selectedTimeframe === '1D' ? '1d' : selectedTimeframe.toLowerCase();
-      let data: AnalysisResult | null = null;
-
       const backendRes = await fetch(
         `/api/backend/signals/${encodeURIComponent(selectedSymbol)}/${encodeURIComponent(timeframe)}`
       );
-      if (backendRes.ok) {
-        const backendData = await backendRes.json();
-        data = {
-          structure: backendData.structure ?? 'Range',
-          regime: backendData.regime ?? 'RANGE',
-          impulseScore: 0,
-          confidence: backendData.confidence ?? 0,
-          pivots: backendData.pivots ?? [],
-          reasoning: backendData.reasoning,
-          zones: backendData.zones ?? [],
-        };
-      }
-
-      if (!data) {
-        const response = await fetch('/api/deep-analysis', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            symbol: selectedSymbol,
-            timeframe: selectedTimeframe,
-          }),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        data = await response.json();
-      }
-
-      if (!data) return;
+      if (!backendRes.ok) throw new Error(`HTTP ${backendRes.status}`);
+      const data: AnalysisResult = await backendRes.json();
       setAnalysis(data);
-      
-      // Get current price from trading data
+      const primaryZone = data.zones?.[0];
       const currentPrice = tradingData.currentPrice || 0;
-      
-      // Merge new zones with locked zones:
-      // 1. Keep existing locked zones (don't recalculate their targets)
-      // 2. Add new zones that don't exist yet
-      // 3. Remove zones that have been hit (price passed target or stop)
-      const newZones = data.zones || [];
-      const mergedZones: TradingZone[] = [];
-      
-      // First, check and update locked zones (remove if hit)
-      for (const [key, lockedZone] of lockedZonesRef.current.entries()) {
-        if (currentPrice === 0) {
-          mergedZones.push(lockedZone);
-          continue;
-        }
-        
-        let isHit = false;
-        if (lockedZone.type === 'BUY') {
-          isHit = currentPrice >= lockedZone.profitTarget || currentPrice <= lockedZone.stopLoss;
-        } else {
-          isHit = currentPrice <= lockedZone.profitTarget || currentPrice >= lockedZone.stopLoss;
-        }
-        
-        if (!isHit) {
-          mergedZones.push(lockedZone);
-        } else {
-          // Remove hit zone from locked zones
-          lockedZonesRef.current.delete(key);
-        }
-      }
-      
-      // Then, add new zones that aren't already locked
-      for (const newZone of newZones) {
-        const zoneKey = `${newZone.time}-${newZone.type}-${newZone.entryPrice.toFixed(2)}`;
-        
-        // Skip if zone already exists (locked)
-        if (lockedZonesRef.current.has(zoneKey)) {
-          continue;
-        }
-        
-        // Check if zone should be added (not hit yet)
-        if (currentPrice === 0) {
-          mergedZones.push(newZone);
-          lockedZonesRef.current.set(zoneKey, newZone);
-        } else {
-          let shouldAdd = false;
-          if (newZone.type === 'BUY') {
-            shouldAdd = currentPrice < newZone.profitTarget && currentPrice > newZone.stopLoss;
-          } else {
-            shouldAdd = currentPrice > newZone.profitTarget && currentPrice < newZone.stopLoss;
-          }
-          
-          if (shouldAdd) {
-            mergedZones.push(newZone);
-            lockedZonesRef.current.set(zoneKey, newZone);
-          }
-        }
-      }
+      const isZoneStillValid = !primaryZone
+        ? false
+        : primaryZone.type === 'BUY'
+          ? currentPrice === 0 || (currentPrice < primaryZone.profitTarget && currentPrice > primaryZone.stopLoss)
+          : currentPrice === 0 || (currentPrice > primaryZone.profitTarget && currentPrice < primaryZone.stopLoss);
+      const activeZones = primaryZone && isZoneStillValid ? [primaryZone] : primaryZone && currentPrice === 0 ? [primaryZone] : [];
       
       setCoreEngineAnalysis({
         structure: data.structure,
         regime: data.regime,
         confidence: data.confidence,
         reasoning: data.reasoning,
-        zones: mergedZones,
+        zones: activeZones,
+        prediction: data.prediction,
+        supportResistance: data.supportResistance,
+        aiPowered: data.aiPowered,
+        analysisSource: data.analysisSource,
       });
 
       // Detect structure change
@@ -247,7 +197,6 @@ export default function LiveAnalysisToggle() {
       console.log('🔴 Core Engine disabled - Clearing state');
       previousStructureRef.current = null;
       setAnalysis(null);
-      lockedZonesRef.current.clear(); // Clear locked zones when disabling
       setCoreEngineAnalysis(null);
     } else {
       console.log('🟢 Core Engine enabled');
@@ -332,6 +281,14 @@ export default function LiveAnalysisToggle() {
               {analysis.confidence.toFixed(0)}%
             </span>
           </div>
+          {analysis.prediction && (
+            <div className="px-2 py-1 sm:px-3 sm:py-1 bg-[#1a1a1a] rounded border border-gray-800">
+              <span className="text-gray-400">AI Call: </span>
+              <span className={`font-semibold ${analysis.prediction.direction === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
+                {analysis.prediction.direction} {analysis.prediction.tradeStyle}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

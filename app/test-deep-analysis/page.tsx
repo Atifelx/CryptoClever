@@ -13,6 +13,7 @@ interface AnalysisResult {
     index: number;
     time: number;
   }>;
+  reasoning?: string;
   cached?: boolean;
   symbol?: string;
   timeframe?: string;
@@ -128,6 +129,13 @@ export default function TestDeepAnalysis() {
                   <div className="text-lg font-semibold">{result.confidence.toFixed(2)}/100</div>
                 </div>
               </div>
+
+              {result.reasoning && (
+                <div className="mb-4 rounded-lg border border-gray-800 bg-[#111] p-4">
+                  <div className="text-sm text-gray-400 mb-2">Reasoning</div>
+                  <div className="text-sm leading-6 text-gray-200">{result.reasoning}</div>
+                </div>
+              )}
 
               {result.symbol && (
                 <div className="mt-4 pt-4 border-t border-gray-800">

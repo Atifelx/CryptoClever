@@ -97,7 +97,6 @@ export async function POST(request: NextRequest) {
 
     // Normalize timeframe: convert '1D' to '1d' for Binance API
     const normalizedTimeframe = timeframe === '1D' ? '1d' : timeframe.toLowerCase();
-
     // Check Redis cache first (use original timeframe for cache key)
     const cacheKey = `engine:${normalizedSymbol}:${timeframe}`;
 

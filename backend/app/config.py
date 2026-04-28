@@ -53,3 +53,7 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://neondb_owner:npg_UP2wNXdc0eVa@ep-icy-lab-a1lqbhz7-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require",
 )
+
+AI_ENGINE_URL = os.getenv("AI_ENGINE_URL", "")
+AI_ENGINE_TIMEOUT_SECONDS = float(os.getenv("AI_ENGINE_TIMEOUT_SECONDS", "25"))
+CORE_ENGINE_USE_AI = os.getenv("CORE_ENGINE_USE_AI", "true").lower() in ("1", "true", "yes")

@@ -8,6 +8,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
   IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+  IMAGE_NAME_AI_ENGINE: ${{ github.repository }}/ai-engine
 
 jobs:
   build-and-push:
@@ -64,6 +65,20 @@ jobs:
           tags: ${{ steps.meta-backend.outputs.tags }}
           labels: ${{ steps.meta-backend.outputs.labels }}
 
+      - name: Extract metadata (tags, labels) for AI Engine
+        id: meta-ai-engine
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPO_LC }}/ai-engine
+
+      - name: Build and push AI Engine image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ai_engine
+          push: true
+          tags: ${{ steps.meta-ai-engine.outputs.tags }}
+          labels: ${{ steps.meta-ai-engine.outputs.labels }}
+
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -105,8 +120,33 @@ jobs:
                 environment:
                   - REDIS_URL=redis://redis:6379/0
                   - TWELVEDATA_API_KEY=${{ secrets.TWELVEDATA_API_KEY }}
+                  - AI_ENGINE_URL=http://ai-engine:8010
+                  - CORE_ENGINE_USE_AI=true
+                  - AI_ENGINE_TIMEOUT_SECONDS=25
                 depends_on:
                   - redis
+
+              ai-engine:
+                image: ${{ env.REGISTRY }}/$REPO_LC/ai-engine:main
+                container_name: smarttrade-ai-engine
+                ports:
+                  - "8010:8010"
+                restart: unless-stopped
+                environment:
+                  - PORT=8010
+                  - BACKEND_MARKET_DATA_URL=http://backend:8000
+                  - AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}
+                  - AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}
+                  - AZURE_OPENAI_MODEL=gpt-5.3-codex
+                  - AZURE_OPENAI_API_VERSION=2025-04-01-preview
+                  - NEWSAPI_KEY=${{ secrets.NEWSAPI_KEY }}
+                  - AI_ENGINE_REQUEST_TIMEOUT_SECONDS=20
+                  - AI_ENGINE_CANDLE_LIMIT=300
+                  - AI_ENGINE_NEWS_RESULTS_LIMIT=5
+                  - AI_ENGINE_SEARCH_RESULTS_LIMIT=4
+                  - AI_ENGINE_NEWS_LOOKBACK_DAYS=2
+                depends_on:
+                  - backend
 
               redis:
                 image: redis:7-alpine

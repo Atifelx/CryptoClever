@@ -24,6 +24,38 @@ export interface TradingData {
   orderHistory: any[];
 }
 
+interface TradingZone {
+  type: 'BUY' | 'SELL';
+  entryPrice: number;
+  profitTarget: number;
+  stopLoss: number;
+  confidence: number;
+  reasoning: string;
+  time: number;
+}
+
+interface CoreEnginePrediction {
+  direction: 'BUY' | 'SELL';
+  tradeStyle: 'SCALP' | 'HOLD';
+  confidence: number;
+  summary: string;
+  reasoning: string;
+  horizon: string;
+  currentPrice: number;
+  targetPrice: number;
+  stopLoss: number;
+  chartLabel: string;
+  expectedPath: string;
+  newsBias: string;
+}
+
+interface SupportResistance {
+  supportLevels: number[];
+  resistanceLevels: number[];
+  lastSwingLow?: number | null;
+  lastSwingHigh?: number | null;
+}
+
 interface TradingState {
   // Selected trading pair and timeframe
   selectedSymbol: string;
@@ -66,15 +98,11 @@ interface TradingState {
     regime: string;
     confidence: number;
     reasoning?: string;
-    zones?: Array<{
-      type: 'BUY' | 'SELL';
-      entryPrice: number;
-      profitTarget: number;
-      stopLoss: number;
-      confidence: number;
-      reasoning: string;
-      time: number;
-    }>;
+    zones?: TradingZone[];
+    prediction?: CoreEnginePrediction;
+    supportResistance?: SupportResistance;
+    aiPowered?: boolean;
+    analysisSource?: string;
   } | null;
   
   // Actions
@@ -92,15 +120,11 @@ interface TradingState {
     regime: string;
     confidence: number;
     reasoning?: string;
-    zones?: Array<{
-      type: 'BUY' | 'SELL';
-      entryPrice: number;
-      profitTarget: number;
-      stopLoss: number;
-      confidence: number;
-      reasoning: string;
-      time: number;
-    }>;
+    zones?: TradingZone[];
+    prediction?: CoreEnginePrediction;
+    supportResistance?: SupportResistance;
+    aiPowered?: boolean;
+    analysisSource?: string;
   } | null) => void;
   setKeepLiveAnalysis: (enabled: boolean) => void;
   setShowHistory: (show: boolean) => void;

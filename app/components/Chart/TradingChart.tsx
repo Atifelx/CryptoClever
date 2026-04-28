@@ -19,6 +19,8 @@ import FMCBROverlay from './FMCBROverlay';
 import TrendIndicatorOverlay from './TrendIndicatorOverlay';
 import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
+import CoreEngineOverlay from './CoreEngineOverlay';
+import AIPredictionOverlay from './AIPredictionOverlay';
 
 interface TradingChartProps {
   symbol: string;
@@ -41,6 +43,7 @@ export default function TradingChart({
   onIndicatorDataUpdate,
 }: TradingChartProps) {
   const isForexSymbol = symbol.startsWith('C:');
+  const { coreEngineAnalysis, keepLiveAnalysis } = useTradingStore();
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -765,6 +768,19 @@ export default function TradingChart({
         <div key={`chart-container-${symbol}`} className="w-full h-full relative">
           {/* Chart canvas */}
           <div ref={chartContainerRef} className="w-full h-full" />
+
+          <AIPredictionOverlay
+            prediction={keepLiveAnalysis ? (coreEngineAnalysis?.prediction ?? null) : null}
+            visible={keepLiveAnalysis}
+          />
+          <CoreEngineOverlay
+            chart={chartRef.current}
+            candleSeries={candleSeriesRef.current}
+            containerRef={chartContainerRef}
+            zone={keepLiveAnalysis ? (coreEngineAnalysis?.zones?.[0] ?? null) : null}
+            supportResistance={keepLiveAnalysis ? (coreEngineAnalysis?.supportResistance ?? null) : null}
+            prediction={keepLiveAnalysis ? (coreEngineAnalysis?.prediction ?? null) : null}
+          />
           
           {/* Trend Indicator Overlay - Renders at top inside chart area with white circle at tail */}
           <TrendIndicatorOverlay

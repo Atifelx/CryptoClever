@@ -19,10 +19,35 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY}
+      - AI_ENGINE_URL=http://ai-engine:8010
+      - CORE_ENGINE_USE_AI=${CORE_ENGINE_USE_AI:-true}
+      - AI_ENGINE_TIMEOUT_SECONDS=${AI_ENGINE_TIMEOUT_SECONDS:-25}
     depends_on:
       - redis
     ports:
       - "8000:10000"
+    restart: unless-stopped
+
+  ai-engine:
+    image: ${AI_ENGINE_IMAGE:-smarttrade-ai-engine:local}
+    container_name: smarttrade-ai-engine
+    environment:
+      - PORT=8010
+      - BACKEND_MARKET_DATA_URL=http://backend:8000
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_MODEL=${AZURE_OPENAI_MODEL:-gpt-5.3-codex}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-2025-04-01-preview}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - AI_ENGINE_REQUEST_TIMEOUT_SECONDS=${AI_ENGINE_REQUEST_TIMEOUT_SECONDS:-20}
+      - AI_ENGINE_CANDLE_LIMIT=${AI_ENGINE_CANDLE_LIMIT:-300}
+      - AI_ENGINE_NEWS_RESULTS_LIMIT=${AI_ENGINE_NEWS_RESULTS_LIMIT:-5}
+      - AI_ENGINE_SEARCH_RESULTS_LIMIT=${AI_ENGINE_SEARCH_RESULTS_LIMIT:-4}
+      - AI_ENGINE_NEWS_LOOKBACK_DAYS=${AI_ENGINE_NEWS_LOOKBACK_DAYS:-2}
+    depends_on:
+      - backend
+    ports:
+      - "8010:8010"
     restart: unless-stopped
 
   redis:
