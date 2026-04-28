@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import TradingChart from './components/Chart/TradingChart';
-import TradingSignalsPanel from './components/Chart/TradingSignalsPanel';
+
 import IndicatorDashboard from './components/Chart/IndicatorDashboard';
 import SymbolList from './components/Sidebar/SymbolList';
 import TimeframeSelector from './components/Header/TimeframeSelector';
@@ -105,7 +105,7 @@ export default function Home() {
 
   // Use safe defaults during SSR
   const safeSymbol = isMounted ? selectedSymbol : 'BTCUSDT';
-  const safeTimeframe = isMounted ? selectedTimeframe : '15m';
+  const safeTimeframe = isMounted ? selectedTimeframe : '5m';
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -166,8 +166,7 @@ export default function Home() {
           />
         </div>
 
-        {/* Trading Signals Panel - Above Chart */}
-        <TradingSignalsPanel />
+
 
         {/* Chart */}
         <div key={`chart-${safeSymbol}-${safeTimeframe}`} className="flex-1 p-2 md:p-4 min-h-0">

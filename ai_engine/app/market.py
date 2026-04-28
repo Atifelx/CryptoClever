@@ -111,6 +111,62 @@ def derive_support_resistance(
     }
 
 
+def _compute_volume_analysis(candles: list[dict[str, Any]]) -> dict[str, Any]:
+    """Analyze volume patterns for confirmation/divergence signals."""
+    if len(candles) < 20:
+        return {
+            "avgVolume20": 0,
+            "currentVolume": 0,
+            "volumeRatio": 1.0,
+            "volumeTrend": "flat",
+            "buyVolumeRatio": 0.5,
+            "volumeConfirmation": "neutral",
+        }
+
+    volumes = [float(c.get("volume", 0)) for c in candles]
+    closes = [float(c["close"]) for c in candles]
+
+    avg_vol_20 = sum(volumes[-20:]) / 20 if volumes[-20:] else 1
+    current_vol = volumes[-1] if volumes else 0
+    vol_ratio = current_vol / avg_vol_20 if avg_vol_20 > 0 else 1.0
+
+    # Volume trend: compare avg of last 5 to avg of previous 15
+    recent_avg = sum(volumes[-5:]) / 5 if len(volumes) >= 5 else avg_vol_20
+    earlier_avg = sum(volumes[-20:-5]) / 15 if len(volumes) >= 20 else avg_vol_20
+    if earlier_avg > 0 and recent_avg / earlier_avg > 1.15:
+        vol_trend = "increasing"
+    elif earlier_avg > 0 and recent_avg / earlier_avg < 0.85:
+        vol_trend = "decreasing"
+    else:
+        vol_trend = "flat"
+
+    # Buy volume estimation: count candles where close > open in last 10
+    buy_candles = sum(1 for c in candles[-10:] if float(c["close"]) >= float(c["open"]))
+    buy_vol_ratio = buy_candles / 10.0
+
+    # Volume confirmation: is volume supporting the price direction?
+    price_direction = "up" if closes[-1] > closes[-5] else "down" if closes[-1] < closes[-5] else "flat"
+    if price_direction == "up" and vol_trend == "increasing":
+        vol_confirm = "bullish_confirmation"
+    elif price_direction == "down" and vol_trend == "increasing":
+        vol_confirm = "bearish_confirmation"
+    elif price_direction == "up" and vol_trend == "decreasing":
+        vol_confirm = "bullish_divergence_warning"
+    elif price_direction == "down" and vol_trend == "decreasing":
+        vol_confirm = "bearish_divergence_warning"
+    else:
+        vol_confirm = "neutral"
+
+    return {
+        "avgVolume20": round(avg_vol_20, 2),
+        "currentVolume": round(current_vol, 2),
+        "volumeRatio": round(vol_ratio, 2),
+        "volumeTrend": vol_trend,
+        "buyVolumeRatio": round(buy_vol_ratio, 2),
+        "volumeConfirmation": vol_confirm,
+    }
+
+
 def compute_market_snapshot(candles: list[dict[str, Any]]) -> dict[str, Any]:
     closes = [float(candle["close"]) for candle in candles]
     current_price = closes[-1]
@@ -168,6 +224,9 @@ def compute_market_snapshot(candles: list[dict[str, Any]]) -> dict[str, Any]:
         reversal_bias += 1.35
         reversal_risk = "bullish-reversal-watch"
 
+    # Volume analysis
+    volume_analysis = _compute_volume_analysis(candles)
+
     return {
         "currentPrice": round(current_price, 4),
         "ema20": round(ema20, 4),
@@ -182,6 +241,7 @@ def compute_market_snapshot(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "supportResistance": support_resistance,
         "shortMomentum": round(short_momentum, 5),
         "reversalRisk": reversal_risk,
+        "volume": volume_analysis,
         "biasScore": (1.5 if structure == "Bullish" else -1.5 if structure == "Bearish" else 0.0)
         + (1.2 if regime == "TREND" and structure == "Bullish" else -1.2 if regime == "TREND" and structure == "Bearish" else 0.0)
         + (0.8 if slope_6 > 0 else -0.8 if slope_6 < 0 else 0.0)
@@ -246,6 +306,110 @@ def build_prediction_markers(prediction: dict[str, Any], zone: dict[str, Any], t
     ]
 
 
+def _build_scalp_trade(
+    direction: str,
+    current_price: float,
+    support_resistance: dict[str, Any],
+    atr_value: float,
+    confidence: float,
+    volume_analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a ~20 minute scalp trade setup with tight stops."""
+    atr = max(atr_value, current_price * 0.003)
+    supports = support_resistance.get("supportLevels", [])
+    resistances = support_resistance.get("resistanceLevels", [])
+    buy = direction.upper() == "BUY"
+
+    if buy:
+        target = current_price + (atr * 0.9)
+        nearest_resistance = next((r for r in resistances if r > current_price), None)
+        if nearest_resistance and (nearest_resistance - current_price) < atr * 1.5:
+            target = min(target, nearest_resistance - (atr * 0.05))
+        stop = current_price - (atr * 0.45)
+        reasoning = f"Scalp BUY: enter at {current_price:.2f}, target {target:.2f} (+{((target-current_price)/current_price)*100:.2f}%), stop {stop:.2f}."
+    else:
+        target = current_price - (atr * 0.9)
+        nearest_support = next((s for s in reversed(supports) if s < current_price), None)
+        if nearest_support and (current_price - nearest_support) < atr * 1.5:
+            target = max(target, nearest_support + (atr * 0.05))
+        stop = current_price + (atr * 0.45)
+        reasoning = f"Scalp SELL: enter at {current_price:.2f}, target {target:.2f} ({((target-current_price)/current_price)*100:.2f}%), stop {stop:.2f}."
+
+    # Adjust confidence based on volume
+    vol_confirm = volume_analysis.get("volumeConfirmation", "neutral")
+    scalp_conf = confidence
+    if "confirmation" in vol_confirm:
+        scalp_conf = min(95, scalp_conf + 5)
+    elif "divergence" in vol_confirm:
+        scalp_conf = max(35, scalp_conf - 10)
+
+    return {
+        "direction": direction.upper(),
+        "entry": round(current_price, 4),
+        "target": round(target, 4),
+        "stop": round(stop, 4),
+        "expectedDuration": "~15-25 minutes",
+        "reasoning": reasoning,
+        "confidence": round(scalp_conf, 2),
+    }
+
+
+def _build_long_trade(
+    direction: str,
+    current_price: float,
+    support_resistance: dict[str, Any],
+    atr_value: float,
+    confidence: float,
+    volume_analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a ~2-4 hour swing trade setup with wider targets."""
+    atr = max(atr_value, current_price * 0.003)
+    supports = support_resistance.get("supportLevels", [])
+    resistances = support_resistance.get("resistanceLevels", [])
+    buy = direction.upper() == "BUY"
+
+    if buy:
+        target = current_price + (atr * 2.5)
+        if len(resistances) > 1:
+            target = max(target, resistances[1])
+        elif resistances:
+            target = max(target, resistances[0] + (atr * 0.5))
+        stop = current_price - (atr * 1.2)
+        nearest_support = next((s for s in supports if s < current_price), None)
+        if nearest_support:
+            stop = min(stop, nearest_support - (atr * 0.15))
+        reasoning = f"Long BUY: enter at {current_price:.2f}, target {target:.2f} (+{((target-current_price)/current_price)*100:.2f}%), stop {stop:.2f}. Wider stops to ride the trend."
+    else:
+        target = current_price - (atr * 2.5)
+        if len(supports) > 1:
+            target = min(target, supports[1])
+        elif supports:
+            target = min(target, supports[0] - (atr * 0.5))
+        stop = current_price + (atr * 1.2)
+        nearest_resistance = next((r for r in resistances if r > current_price), None)
+        if nearest_resistance:
+            stop = max(stop, nearest_resistance + (atr * 0.15))
+        reasoning = f"Long SELL: enter at {current_price:.2f}, target {target:.2f} ({((target-current_price)/current_price)*100:.2f}%), stop {stop:.2f}. Wider stops to ride the trend."
+
+    # Adjust confidence based on volume trend alignment
+    vol_trend = volume_analysis.get("volumeTrend", "flat")
+    long_conf = confidence
+    if vol_trend == "increasing":
+        long_conf = min(95, long_conf + 3)
+    elif vol_trend == "decreasing":
+        long_conf = max(35, long_conf - 5)
+
+    return {
+        "direction": direction.upper(),
+        "entry": round(current_price, 4),
+        "target": round(target, 4),
+        "stop": round(stop, 4),
+        "expectedDuration": "~2-4 hours",
+        "reasoning": reasoning,
+        "confidence": round(long_conf, 2),
+    }
+
+
 def build_fallback_prediction(
     market_snapshot: dict[str, Any],
     news_bias: dict[str, Any],
@@ -257,26 +421,40 @@ def build_fallback_prediction(
     trade_style = "HOLD" if market_snapshot["regime"] == "TREND" and abs(combined_bias) >= 1.8 else "SCALP"
     confidence = max(45.0, min(90.0, market_snapshot["confidence"] + (abs(news_bias["score"]) * 4)))
     current_price = market_snapshot["currentPrice"]
+    atr = market_snapshot["atr"]
+    volume_analysis = market_snapshot.get("volume", {})
 
     if direction == "BUY":
-        target = next((level for level in support_resistance["resistanceLevels"] if level > current_price), current_price + (market_snapshot["atr"] * 2))
+        target = next((level for level in support_resistance["resistanceLevels"] if level > current_price), current_price + (atr * 2))
         if trade_style == "HOLD" and len(support_resistance["resistanceLevels"]) > 1:
             target = support_resistance["resistanceLevels"][1]
-        stop = next((level for level in support_resistance["supportLevels"] if level < current_price), current_price - (market_snapshot["atr"] * 1.2))
+        stop = next((level for level in support_resistance["supportLevels"] if level < current_price), current_price - (atr * 1.2))
         expected_path = f"Likely dip-hold above {support_resistance['lastSwingLow'] or stop:.2f} before pushing toward {target:.2f}."
+        why_up = f"EMA20 above EMA50 ({market_snapshot['structure']}), momentum is positive. " + (f"Volume is {volume_analysis.get('volumeTrend', 'flat')} confirming the move. " if volume_analysis else "") + (f"{news_summary}" if news_bias["label"] == "bullish" else "")
+        why_down = f"Nearest resistance at {support_resistance.get('lastSwingHigh', target):.2f} could reject price. " + (f"Volume shows {volume_analysis.get('volumeConfirmation', 'neutral')}. " if volume_analysis else "") + (f"{news_summary}" if news_bias["label"] == "bearish" else "Reversal risk: " + market_snapshot.get("reversalRisk", "low") + ".")
     else:
-        target = next((level for level in reversed(support_resistance["supportLevels"]) if level < current_price), current_price - (market_snapshot["atr"] * 2))
+        target = next((level for level in reversed(support_resistance["supportLevels"]) if level < current_price), current_price - (atr * 2))
         if trade_style == "HOLD" and len(support_resistance["supportLevels"]) > 1:
             target = support_resistance["supportLevels"][1]
-        stop = next((level for level in support_resistance["resistanceLevels"] if level > current_price), current_price + (market_snapshot["atr"] * 1.2))
+        stop = next((level for level in support_resistance["resistanceLevels"] if level > current_price), current_price + (atr * 1.2))
         expected_path = f"Likely rejection below {support_resistance['lastSwingHigh'] or stop:.2f} before rotating toward {target:.2f}."
+        why_up = f"Nearest support at {support_resistance.get('lastSwingLow', target):.2f} could bounce price. " + (f"{news_summary}" if news_bias["label"] == "bullish" else "")
+        why_down = f"EMA20 below EMA50 ({market_snapshot['structure']}), bearish momentum. " + (f"Volume is {volume_analysis.get('volumeTrend', 'flat')} confirming selling. " if volume_analysis else "") + (f"{news_summary}" if news_bias["label"] == "bearish" else "")
 
     summary = f"{direction} for {trade_style.lower()}: {expected_path}"
     reasoning = (
         f"Technical structure is {market_snapshot['structure']} with regime {market_snapshot['regime']} and "
         f"news bias {news_bias['label']}. Reversal risk is {market_snapshot['reversalRisk']}. "
+        f"Volume trend: {volume_analysis.get('volumeTrend', 'unknown')}, confirmation: {volume_analysis.get('volumeConfirmation', 'neutral')}. "
         f"{news_summary} The higher-probability move is {direction} with a {trade_style.lower()} setup."
     )
+
+    expected_duration = "~15-25 minutes" if trade_style == "SCALP" else "~2-4 hours"
+
+    # Build both trade plans
+    scalp_trade = _build_scalp_trade(direction, current_price, support_resistance, atr, confidence, volume_analysis)
+    long_trade = _build_long_trade(direction, current_price, support_resistance, atr, confidence, volume_analysis)
+
     return {
         "direction": direction,
         "tradeStyle": trade_style,
@@ -290,4 +468,9 @@ def build_fallback_prediction(
         "chartLabel": f"AI {direction} {trade_style}",
         "expectedPath": expected_path,
         "newsBias": news_bias["label"],
+        "whyUp": why_up.strip(),
+        "whyDown": why_down.strip(),
+        "expectedDuration": expected_duration,
+        "scalpTrade": scalp_trade,
+        "longTrade": long_trade,
     }

@@ -10,11 +10,10 @@ export interface TradingPair {
   name: string;
   displayName?: string;
   logoUrl?: string;
-  // Dynamic trading metrics
   volume?: number;
   priceChange?: number;
   lastPrice?: number;
-  count?: number; // Number of trades
+  count?: number;
 }
 
 export interface TradingData {
@@ -34,6 +33,16 @@ interface TradingZone {
   time: number;
 }
 
+interface TradeSetup {
+  direction: 'BUY' | 'SELL';
+  entry: number;
+  target: number;
+  stop: number;
+  expectedDuration: string;
+  reasoning: string;
+  confidence: number;
+}
+
 interface CoreEnginePrediction {
   direction: 'BUY' | 'SELL';
   tradeStyle: 'SCALP' | 'HOLD';
@@ -47,6 +56,11 @@ interface CoreEnginePrediction {
   chartLabel: string;
   expectedPath: string;
   newsBias: string;
+  whyUp: string;
+  whyDown: string;
+  expectedDuration: string;
+  scalpTrade: TradeSetup | null;
+  longTrade: TradeSetup | null;
 }
 
 interface SupportResistance {
@@ -57,42 +71,23 @@ interface SupportResistance {
 }
 
 interface TradingState {
-  // Selected trading pair and timeframe
   selectedSymbol: string;
   selectedTimeframe: Timeframe;
-  
-  // Favorites
   favorites: string[];
-  
-  // Trading data
   tradingData: TradingData;
-  
-  // Search
   searchQuery: string;
-  
-  // Filter mode
   filterMode: 'trending' | 'all' | 'cheap' | 'mostTrades';
-  
-  // All trading pairs (loaded from Binance)
   allPairs: TradingPair[];
   categorizedPairs: Record<string, TradingPair[]>;
   isLoadingPairs: boolean;
-  
-  // Ticker data for dynamic sorting
   tickerData: Record<string, {
     volume: number;
     priceChange: number;
     lastPrice: number;
     count: number;
   }>;
-  
-  // Trade history panel visibility
   showHistory: boolean;
-  
-  // Core Engine / FMCBR Live Analysis toggle
   keepLiveAnalysis: boolean;
-  
-  // Core Engine Analysis
   coreEngineAnalysis: {
     structure: string;
     regime: string;
@@ -104,8 +99,6 @@ interface TradingState {
     aiPowered?: boolean;
     analysisSource?: string;
   } | null;
-  
-  // Actions
   setSelectedSymbol: (symbol: string) => void;
   setSelectedTimeframe: (timeframe: Timeframe) => void;
   toggleFavorite: (symbol: string) => void;
@@ -115,31 +108,16 @@ interface TradingState {
   setAllPairs: (pairs: TradingPair[], categorized: Record<string, TradingPair[]>) => void;
   setLoadingPairs: (loading: boolean) => void;
   setTickerData: (data: Record<string, { volume: number; priceChange: number; lastPrice: number; count: number }>) => void;
-  setCoreEngineAnalysis: (analysis: {
-    structure: string;
-    regime: string;
-    confidence: number;
-    reasoning?: string;
-    zones?: TradingZone[];
-    prediction?: CoreEnginePrediction;
-    supportResistance?: SupportResistance;
-    aiPowered?: boolean;
-    analysisSource?: string;
-  } | null) => void;
+  setCoreEngineAnalysis: (analysis: any | null) => void;
   setKeepLiveAnalysis: (enabled: boolean) => void;
   setShowHistory: (show: boolean) => void;
 }
 
-// Backend-driven symbols: BTC, ETH, SOL, BNB, XRP; fallback when backend unavailable
 export const BACKEND_SYMBOLS_FALLBACK: TradingPair[] = [
   { symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', name: 'BTC/USDT', displayName: 'Bitcoin' },
   { symbol: 'ETHUSDT', baseAsset: 'ETH', quoteAsset: 'USDT', name: 'ETH/USDT', displayName: 'Ethereum' },
-  { symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', name: 'SOL/USDT', displayName: 'Solana' },
-  { symbol: 'BNBUSDT', baseAsset: 'BNB', quoteAsset: 'USDT', name: 'BNB/USDT', displayName: 'BNB' },
-  { symbol: 'XRPUSDT', baseAsset: 'XRP', quoteAsset: 'USDT', name: 'XRP/USDT', displayName: 'XRP' },
   { symbol: 'C:XAUUSD', baseAsset: 'XAU', quoteAsset: 'USD', name: 'XAU/USD', displayName: 'Gold' },
-  { symbol: 'C:EURUSD', baseAsset: 'EUR', quoteAsset: 'USD', name: 'EUR/USD', displayName: 'Euro' },
-  { symbol: 'C:USDJPY', baseAsset: 'USD', quoteAsset: 'JPY', name: 'USD/JPY', displayName: 'Yen' },
+  { symbol: 'C:GBPJPY', baseAsset: 'GBP', quoteAsset: 'JPY', name: 'GBP/JPY', displayName: 'British Pound / Yen' },
 ];
 
 export const SYMBOL_DISPLAY: Record<string, { name: string; base: string; quote: string }> = Object.fromEntries(
@@ -149,20 +127,14 @@ export const SYMBOL_DISPLAY: Record<string, { name: string; base: string; quote:
 export const POPULAR_PAIRS: TradingPair[] = [...BACKEND_SYMBOLS_FALLBACK];
 
 export const TIMEFRAMES = [
-  { label: '1m', value: '1m' as Timeframe },
   { label: '5m', value: '5m' as Timeframe },
-  { label: '15m', value: '15m' as Timeframe },
-  { label: '1h', value: '1h' as Timeframe },
-  { label: '4h', value: '4h' as Timeframe },
-  { label: '1D', value: '1D' as Timeframe },
 ];
 
 export const useTradingStore = create<TradingState>()(
   persist(
     (set) => ({
-      // Initial state
       selectedSymbol: 'BTCUSDT',
-      selectedTimeframe: '15m',
+      selectedTimeframe: '5m',
       favorites: [],
       tradingData: {
         currentPrice: 0,
@@ -180,11 +152,8 @@ export const useTradingStore = create<TradingState>()(
       keepLiveAnalysis: false,
       showHistory: false,
 
-      // Actions
       setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
-      
       setSelectedTimeframe: (timeframe) => set({ selectedTimeframe: timeframe }),
-      
       toggleFavorite: (symbol) =>
         set((state) => {
           const newFavorites = state.favorites.includes(symbol)
@@ -192,21 +161,15 @@ export const useTradingStore = create<TradingState>()(
             : [...state.favorites, symbol];
           return { favorites: newFavorites };
         }),
-      
       updateTradingData: (data) =>
         set((state) => ({
           tradingData: { ...state.tradingData, ...data },
         })),
-      
       setSearchQuery: (query) => set({ searchQuery: query }),
-      
       setFilterMode: (mode) => set({ filterMode: mode }),
-      
       setAllPairs: (pairs, categorized) => 
         set({ allPairs: pairs, categorizedPairs: categorized }),
-      
       setLoadingPairs: (loading) => set({ isLoadingPairs: loading }),
-      
       setTickerData: (data) => set({ tickerData: data }),
       setCoreEngineAnalysis: (analysis) => set({ coreEngineAnalysis: analysis }),
       setKeepLiveAnalysis: (enabled) => set({ keepLiveAnalysis: enabled }),
@@ -223,28 +186,12 @@ export const useTradingStore = create<TradingState>()(
       onRehydrateStorage: () => (state, error) => {
         if (error) {
           console.error('Error rehydrating store:', error);
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.removeItem('trading-storage');
-            } catch (e) {
-              console.error('Error clearing storage:', e);
-            }
-          }
         } else if (state) {
-          // Validate and fix old data format
-          if (state.selectedSymbol && typeof state.selectedSymbol === 'object') {
-            const oldSymbol = state.selectedSymbol as any;
-            state.selectedSymbol = oldSymbol.name || oldSymbol.symbol || 'BTCUSDT';
-            console.warn('Migrated old symbol format to new format');
-          }
           if (typeof state.selectedSymbol !== 'string') {
             state.selectedSymbol = 'BTCUSDT';
           }
-          // Force 15m migration for stale storage
-          if (state.selectedTimeframe === '1m') {
-            state.selectedTimeframe = '15m';
-            console.log('Migrated stale 1m timeframe to 15m');
-          }
+          // Force 5m timeframe for everyone
+          state.selectedTimeframe = '5m';
         }
       },
     }

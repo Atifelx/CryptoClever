@@ -80,7 +80,7 @@ async def test_binance():
     import httpx
     from app.config import HTTP_PROXY, HTTPS_PROXY
     
-    params = {"symbol": "BTCUSDT", "interval": "15m", "limit": 5}
+    params = {"symbol": "BTCUSDT", "interval": "5m", "limit": 5}
     
     # Configure proxy if available
     proxies = {}
@@ -139,7 +139,7 @@ async def debug_verify_unique_data():
     """Check if each symbol has unique data (bug = all same last_close)."""
     results = {}
     for symbol in SYMBOLS:
-        candles = await get_candles(symbol, "15m", 5)
+        candles = await get_candles(symbol, "5m", 5)
         results[symbol] = {
             "count": len(candles),
             "last_close": candles[-1].get("close") if candles else None,
@@ -236,7 +236,7 @@ TEST_CANDLES_HTML = """<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Test History + Live (15m)</title>
+  <title>Test History + Live (5m)</title>
   <style>
     body { font-family: system-ui; background: #0f0f0f; color: #e0e0e0; padding: 20px; max-width: 900px; }
     h1 { font-size: 1.25rem; }
@@ -252,16 +252,16 @@ TEST_CANDLES_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <h1>Test History + Live (15m) – URLs this app uses</h1>
+  <h1>Test History + Live (5m) – URLs this app uses</h1>
 
   <section>
     <h2>Existing URLs (our app)</h2>
-    <p><strong>History (REST, 15m, 12h = 48 candles):</strong></p>
-    <p class="url"><code id="url-history">/api/historical/BTCUSDT?interval=15m&hours=12</code></p>
-    <p><strong>Live (WebSocket, 15m):</strong></p>
+    <p><strong>History (REST, 5m, 12h = 48 candles):</strong></p>
+    <p class="url"><code id="url-history">/api/historical/BTCUSDT?interval=5m&hours=12</code></p>
+    <p><strong>Live (WebSocket, 5m):</strong></p>
     <p class="url"><code id="url-ws">/ws/BTCUSDT</code></p>
-    <p><strong>Binance URL (backend subscribes to, BTC 15m only):</strong></p>
-    <p class="url"><code>wss://stream.binance.com:9443/stream?streams=btcusdt@kline_15m</code></p>
+    <p><strong>Binance URL (backend subscribes to, BTC 5m only):</strong></p>
+    <p class="url"><code>wss://stream.binance.com:9443/stream?streams=btcusdt@kline_5m</code></p>
   </section>
 
   <section>
@@ -339,23 +339,23 @@ TEST_CANDLES_HTML = """<!DOCTYPE html>
 
 @app.get("/test/candles/urls")
 async def test_candles_urls(request: Request):
-    """Return JSON of the history and live URLs the app uses (15m). For scripts or browser."""
+    """Return JSON of the history and live URLs the app uses (5m). For scripts or browser."""
     base = str(request.base_url).rstrip("/")
     base_ws = base.replace("http://", "ws://").replace("https://", "wss://")
     return {
         "history_rest": {
-            "description": "History (15m, 12h = 48 candles) – same as app",
-            "url_template": base + "/api/historical/{symbol}?interval=15m&hours=12",
-            "example": base + "/api/historical/BTCUSDT?interval=15m&hours=12",
+            "description": "History (5m, 12h = 48 candles) – same as app",
+            "url_template": base + "/api/historical/{symbol}?interval=5m&hours=12",
+            "example": base + "/api/historical/BTCUSDT?interval=5m&hours=12",
         },
         "live_websocket": {
-            "description": "Live (15m) – same as app",
+            "description": "Live (5m) – same as app",
             "url_template": base_ws + "/ws/{symbol}",
             "example": base_ws + "/ws/BTCUSDT",
         },
         "binance_ws_backend_subscribes": {
-            "description": "Binance URL backend uses (BTC 15m only)",
-            "url": "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_15m",
+            "description": "Binance URL backend uses (BTC 5m only)",
+            "url": "wss://stream.binance.com:9443/stream?streams=btcusdt@kline_5m",
         },
         "symbols": list(SYMBOLS),
     }
@@ -363,17 +363,17 @@ async def test_candles_urls(request: Request):
 
 @app.get("/test/candles", response_class=HTMLResponse)
 async def test_candles_page():
-    """Single endpoint to test history + live in browser. Uses same URLs as the app (15m)."""
+    """Single endpoint to test history + live in browser. Uses same URLs as the app (5m)."""
     return TEST_CANDLES_HTML
 
 
 # Interval to seconds for historical limit calculation
-_HISTORICAL_INTERVAL_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400, "6h": 21600, "8h": 28800, "12h": 43200, "1d": 86400, "3d": 259200, "1w": 604800}
+_HISTORICAL_INTERVAL_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "5m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400, "6h": 21600, "8h": 28800, "12h": 43200, "1d": 86400, "3d": 259200, "1w": 604800}
 
 
 @app.get("/api/historical/{symbol}")
-async def api_historical(symbol: str, interval: str = "15m", hours: int = 12):
-    """Proposal API: historical candles (time in ms, is_closed true). Any symbol in SYMBOLS, 15m."""
+async def api_historical(symbol: str, interval: str = "5m", hours: int = 12):
+    """Proposal API: historical candles (time in ms, is_closed true). Any symbol in SYMBOLS, 5m."""
     symbol = normalize_symbol(symbol)
     interval = normalize_interval(interval)
 
@@ -387,7 +387,7 @@ async def api_historical(symbol: str, interval: str = "15m", hours: int = 12):
     candles = await get_candles(symbol, interval, limit=limit)
     data = [
         {
-            "time": c["time"] * 1000,
+            "time": c["time"],
             "open": c["open"],
             "high": c["high"],
             "low": c["low"],
@@ -432,7 +432,7 @@ async def streaming_status():
 
 
 @app.get("/validate/candles")
-async def validate_candles(interval: str = "15m"):
+async def validate_candles(interval: str = "5m"):
     """Programmatic validation: compare last close across symbols. Returns PASS if data differs per symbol, FAIL if same for all."""
     interval = interval.lower() if interval.upper() != "1D" else "1d"
     last_closes: dict[str, float] = {}
@@ -466,7 +466,7 @@ async def validate_candles(interval: str = "15m"):
 @app.get("/verify/status")
 async def verify_status():
     """JSON check: server up and Binance bootstrap has candle data. Use for curl or /api/backend/verify/status."""
-    data = await get_candles("BTCUSDT", "15m", limit=1)
+    data = await get_candles("BTCUSDT", "5m", limit=1)
     if data and len(data) > 0:
         return {"ok": True, "message": "Backend and Binance bootstrap OK"}
     return {"ok": False, "message": "Bootstrap not ready or no candle data"}
@@ -613,7 +613,7 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Verify: Binance 1000 candles (15m)</title>
+  <title>Verify: Binance 1000 candles (5m)</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 16px; }
@@ -637,7 +637,7 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
 <body>
   <h1>Verify: Binance 1000 candles</h1>
   <p class="sub">Table of candle counts per symbol × interval (target 1000). Auto-refreshes every 4s.</p>
-  <p id="summary" class="summary">All symbols (15m) have 1000 candles: —</p>
+  <p id="summary" class="summary">All symbols (5m) have 1000 candles: —</p>
   <div id="serverStatus" class="status-box err">Checking backend…</div>
   <p class="sub">Last fetch: <span id="lastFetch">—</span></p>
   <table>
@@ -849,7 +849,7 @@ INSPECT_WS_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <h1>Live WebSocket candles</h1>
-  <p class="sub">Subscribes to BTCUSDT 15m; shows the last 30 candle updates from the backend WebSocket. If no new rows appear, the Binance stream or backend may have stopped.</p>
+  <p class="sub">Subscribes to BTCUSDT 5m; shows the last 30 candle updates from the backend WebSocket. If no new rows appear, the Binance stream or backend may have stopped.</p>
   <div id="connStatus" class="status-box disconnected">Connecting…</div>
   <p class="sub">Received: <span id="count">0</span> messages</p>
   <div style="max-height: 70vh; overflow: auto;">
@@ -890,8 +890,8 @@ INSPECT_WS_HTML = """<!DOCTYPE html>
       const ws = new WebSocket(wsUrl);
       ws.onopen = function() {
         connStatus.className = 'status-box connected';
-        connStatus.innerHTML = 'Connected. Subscribed to BTCUSDT 15m. Waiting for live candle updates…';
-        ws.send(JSON.stringify({ symbol: 'BTCUSDT', interval: '15m' }));
+        connStatus.innerHTML = 'Connected. Subscribed to BTCUSDT 5m. Waiting for live candle updates…';
+        ws.send(JSON.stringify({ symbol: 'BTCUSDT', interval: '5m' }));
       };
       ws.onmessage = function(ev) {
         try {
@@ -946,7 +946,7 @@ VERIFY_LIVE_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <h1>Verify: Live candle appends (Binance to backend store)</h1>
-  <p class="sub">Subscribes to all symbols (15m). New rows appear as Binance sends kline updates and the backend appends to memory/Redis and broadcasts over WebSocket.</p>
+  <p class="sub">Subscribes to all symbols (5m). New rows appear as Binance sends kline updates and the backend appends to memory/Redis and broadcasts over WebSocket.</p>
   <div id="connStatus" class="status-box disconnected">Connecting…</div>
   <p class="sub">Received: <span id="count">0</span> messages</p>
   <div style="max-height: 70vh; overflow: auto;">
@@ -987,8 +987,8 @@ VERIFY_LIVE_HTML = """<!DOCTYPE html>
       const ws = new WebSocket(wsUrl);
       ws.onopen = function() {
         connStatus.className = 'status-box connected';
-        connStatus.textContent = 'Connected. Subscribed to ' + SYMBOLS.length + ' symbols (15m). Waiting for live candle updates…';
-        ws.send(JSON.stringify({ subscriptions: SYMBOLS.map(function(s) { return { symbol: s, interval: '15m' }; }) }));
+        connStatus.textContent = 'Connected. Subscribed to ' + SYMBOLS.length + ' symbols (5m). Waiting for live candle updates…';
+        ws.send(JSON.stringify({ subscriptions: SYMBOLS.map(function(s) { return { symbol: s, interval: '5m' }; }) }));
       };
       ws.onmessage = function(ev) {
         try {
@@ -1035,10 +1035,10 @@ async def websocket_proposal(websocket: WebSocket, symbol: str):
         return
     
     try:
-        candles = await get_candles(symbol, "15m", limit=720)
+        candles = await get_candles(symbol, "5m", limit=720)
         data = [
             {
-                "time": c["time"] * 1000,
+                "time": c["time"],
                 "open": c["open"],
                 "high": c["high"],
                 "low": c["low"],
@@ -1049,7 +1049,7 @@ async def websocket_proposal(websocket: WebSocket, symbol: str):
             for c in candles
         ]
         await websocket.send_json({"type": "historical", "symbol": symbol, "data": data})
-        await ws_broadcast.subscribe_proposal(websocket, symbol, "15m")
+        await ws_broadcast.subscribe_proposal(websocket, symbol, "5m")
         logger.info("Proposal WS client connected to /ws/%s, sent %d historical candles", symbol, len(data))
         while True:
             await websocket.receive_text()
@@ -1069,7 +1069,7 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
     """
     symbol = normalize_symbol(symbol)
     await websocket.accept()
-    await ws_broadcast.subscribe(websocket, symbol, "15m")
+    await ws_broadcast.subscribe(websocket, symbol, "5m")
     logger.info("Client connected to /ws/candles/%s (shared feed)", symbol)
     try:
         while True:
@@ -1152,7 +1152,12 @@ async def candles(symbol: str, interval: str, limit: int = 500):
 
 @app.get("/signals/{symbol}/{interval}")
 async def signals(symbol: str, interval: str):
-    """Return computed indicators/signals for symbol/interval (from Redis cache or compute on-demand)."""
+    """Return computed indicators/signals for symbol/interval (from Redis cache or compute on-demand).
+    
+    Anti-flip-flop: if a cached result exists and the new result tries to flip direction
+    (BUY→SELL or SELL→BUY) with confidence < 65%, we keep the cached result to prevent
+    whipsaw signals that lose traders money.
+    """
     interval = interval.lower() if interval.upper() != "1D" else "1d"
     symbol = symbol.upper()
     cached = await get_signals(symbol, interval)
@@ -1162,6 +1167,12 @@ async def signals(symbol: str, interval: str):
         and cached.get("analysisSource") != "ai-engine"
     ):
         return cached
+    
+    # Remember previous direction for anti-flip-flop
+    prev_direction = None
+    if cached and cached.get("prediction"):
+        prev_direction = cached["prediction"].get("direction")
+    
     if CORE_ENGINE_USE_AI and AI_ENGINE_URL:
         try:
             import httpx
@@ -1173,15 +1184,42 @@ async def signals(symbol: str, interval: str):
                 )
             if response.is_success:
                 result = response.json()
+                # Anti-flip-flop check
+                new_direction = result.get("prediction", {}).get("direction")
+                new_confidence = result.get("prediction", {}).get("confidence", 0)
+                if (prev_direction and new_direction
+                    and prev_direction != new_direction
+                    and new_confidence < 65):
+                    logger.info(
+                        "Anti-flip-flop: %s/%s tried to flip %s→%s with only %.0f%% confidence. Keeping %s.",
+                        symbol, interval, prev_direction, new_direction, new_confidence, prev_direction,
+                    )
+                    # Keep the cached result — don't flip on low confidence
+                    return cached
                 await set_signals(symbol, interval, result)
                 return result
-            logger.warning("AI engine returned %s for %s/%s: %s", response.status_code, symbol, interval, response.text[:300])
+            else:
+                logger.warning("AI engine returned %s for %s/%s: %s. Falling back to local engine.", response.status_code, symbol, interval, response.text[:300])
         except Exception as exc:
             logger.warning("AI engine unavailable for %s/%s, falling back: %s", symbol, interval, exc)
     candles_data = await get_candles(symbol, interval, limit=500)
     if not candles_data or len(candles_data) < 20:
         raise HTTPException(status_code=404, detail="Insufficient candles for signals.")
     result = compute_signals(candles_data)
+    
+    # Anti-flip-flop check for fallback engine too
+    new_direction = result.get("prediction", {}).get("direction")
+    new_confidence = result.get("prediction", {}).get("confidence", 0)
+    if (prev_direction and new_direction
+        and prev_direction != new_direction
+        and new_confidence < 65):
+        logger.info(
+            "Anti-flip-flop (fallback): %s/%s tried to flip %s→%s with only %.0f%% confidence. Keeping previous.",
+            symbol, interval, prev_direction, new_direction, new_confidence,
+        )
+        if cached:
+            return cached
+    
     await set_signals(symbol, interval, result)
     return result
 

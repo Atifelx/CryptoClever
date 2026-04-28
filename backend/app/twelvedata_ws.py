@@ -11,17 +11,17 @@ from app.ws_broadcast import broadcast_candle, broadcast_candle_proposal
 
 logger = logging.getLogger(__name__)
 
-_FOREX_INTERVAL = "15m"
-_TWELVEDATA_INTERVAL = "15min"
-_FOREX_OUTPUTSIZE = 1000
+_FOREX_INTERVAL = "5m"
+_TWELVEDATA_INTERVAL = "5min"
+_FOREX_OUTPUTSIZE = 500
 _POLL_BUFFER_SECONDS = 20
 _FETCH_RETRIES = 3
 _FETCH_BACKOFF_SECONDS = 5
 
 _TWELVEDATA_SYMBOL_MAP = {
     "C:XAUUSD": "XAU/USD",
-    "C:EURUSD": "EUR/USD",
     "C:USDJPY": "USD/JPY",
+    "C:GBPJPY": "GBP/JPY",
 }
 
 
@@ -112,9 +112,9 @@ def _rows_to_candles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return candles
 
 
-def _seconds_until_next_15m_close(buffer_seconds: int = _POLL_BUFFER_SECONDS) -> float:
+def _seconds_until_next_5m_close(buffer_seconds: int = _POLL_BUFFER_SECONDS) -> float:
     now = datetime.now(timezone.utc)
-    next_minute = ((now.minute // 15) + 1) * 15
+    next_minute = ((now.minute // 5) + 1) * 5
     if next_minute >= 60:
         next_bar = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     else:
@@ -185,4 +185,4 @@ async def run_twelvedata_poll_for_symbol(symbol: str) -> None:
         except Exception as e:
             logger.warning("[TWELVEDATA_POLLER] Polling error (%s): %s", symbol, e)
 
-        await asyncio.sleep(_seconds_until_next_15m_close())
+        await asyncio.sleep(_seconds_until_next_5m_close())

@@ -30,6 +30,17 @@ class TradingZone(BaseModel):
     time: int
 
 
+class TradeSetup(BaseModel):
+    """Individual trade plan for a specific horizon (scalp or long)."""
+    direction: Literal["BUY", "SELL"]
+    entry: float
+    target: float
+    stop: float
+    expectedDuration: str  # e.g. "~20 minutes", "~2-4 hours"
+    reasoning: str
+    confidence: float = 50.0
+
+
 class Prediction(BaseModel):
     direction: Literal["BUY", "SELL"]
     tradeStyle: Literal["SCALP", "HOLD"]
@@ -43,6 +54,12 @@ class Prediction(BaseModel):
     chartLabel: str
     expectedPath: str
     newsBias: str
+    # New deep-analysis fields
+    whyUp: str = ""
+    whyDown: str = ""
+    expectedDuration: str = ""
+    scalpTrade: Optional[TradeSetup] = None
+    longTrade: Optional[TradeSetup] = None
 
 
 class SupportResistance(BaseModel):

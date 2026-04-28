@@ -212,276 +212,112 @@ function getNearestLevels(
   return [...supports, ...resistances];
 }
 
-interface BreakoutContext {
-  direction: 'BULLISH' | 'BEARISH';
-  breakType: 'IB' | 'DB';
-  breakIndex: number;
-  breakLevel: number;
-  swingHigh: number;
-  swingLow: number;
-  signalTime: number;
-  status: FMCBRSignal['status'];
-  cb1: boolean;
-}
+// ──── Step 3: Breakout Detection (Official IB/DB/CB1 Logic) ────
 
-function detectBreakout(candles: Candle[]): BreakoutContext | null {
-  const pivots = findPivots(candles);
-  const pivotHighs = pivots.filter((pivot) => pivot.type === 'high');
-  const pivotLows = pivots.filter((pivot) => pivot.type === 'low');
-  const current = candles[candles.length - 1];
-  const atr = computeATR(candles);
-  const breakBuffer = Math.max(atr * BREAK_BUFFER_ATR, current.close * 0.0005);
-  const retestTolerance = Math.max(atr * RETEST_TOLERANCE_ATR, current.close * 0.0008);
+function detectBreak(candles: Candle[]): { type: 'IB' | 'DB'; index: number; direction: 'BULLISH' | 'BEARISH'; swingHigh: number; swingLow: number } | null {
+  if (candles.length < 10) return null;
 
-  const lastPivotHigh = [...pivotHighs].reverse().find((pivot) => pivot.index < candles.length - 1);
-  const lastPivotLow = [...pivotLows].reverse().find((pivot) => pivot.index < candles.length - 1);
+  // Search back up to 30 candles for a breakout of a single "target" candle
+  for (let i = candles.length - 30; i < candles.length - 3; i++) {
+    if (i < 0) continue;
+    const target = candles[i];
+    
+    let opposingCount = 0;
+    let direction: 'BULLISH' | 'BEARISH' | null = null;
+    let maxHigh = target.high;
+    let minLow = target.low;
 
-  if (lastPivotHigh && current.close > lastPivotHigh.price + breakBuffer) {
-    const breakIndex = candles.findIndex((candle, index) => index > lastPivotHigh.index && candle.close > lastPivotHigh.price + breakBuffer);
-    const priorLow = [...pivotLows].reverse().find((pivot) => pivot.index < lastPivotHigh.index);
-    const swingLow = priorLow?.price ?? Math.min(...candles.slice(Math.max(0, lastPivotHigh.index - 20), lastPivotHigh.index + 1).map((c) => c.low));
-    const confirmingCandles = candles.slice(Math.max(0, breakIndex), candles.length).filter((candle) => candle.close > lastPivotHigh.price).length;
-    const retestCandle = candles
-      .slice(Math.max(0, breakIndex))
-      .find((candle) => candle.low <= lastPivotHigh.price + retestTolerance && candle.close >= lastPivotHigh.price);
-    return {
-      direction: 'BULLISH',
-      breakType: confirmingCandles >= 2 ? 'DB' : 'IB',
-      breakIndex,
-      breakLevel: lastPivotHigh.price,
-      swingHigh: lastPivotHigh.price,
-      swingLow,
-      signalTime: retestCandle?.time ?? candles[Math.max(breakIndex, 0)]?.time ?? current.time,
-      status: retestCandle ? 'READY' : confirmingCandles >= 1 ? 'WAITING_RETEST' : 'WAITING_CB1',
-      cb1: confirmingCandles >= 1,
-    };
+    for (let j = i + 1; j < candles.length; j++) {
+      const c = candles[j];
+      const isUpBreak = c.close > target.high;
+      const isDownBreak = c.close < target.low;
+      
+      if (isUpBreak) {
+        if (direction === 'BEARISH') break;
+        direction = 'BULLISH';
+        opposingCount++;
+        maxHigh = Math.max(maxHigh, c.high);
+      } else if (isDownBreak) {
+        if (direction === 'BULLISH') break;
+        direction = 'BEARISH';
+        opposingCount++;
+        minLow = Math.min(minLow, c.low);
+      } else {
+        if (opposingCount > 0) break;
+      }
+    }
+    
+    if (opposingCount >= 1 && direction) {
+      return {
+        type: opposingCount >= 3 ? 'DB' : 'IB',
+        index: i,
+        direction,
+        swingHigh: maxHigh,
+        swingLow: minLow,
+      };
+    }
   }
-
-  if (lastPivotLow && current.close < lastPivotLow.price - breakBuffer) {
-    const breakIndex = candles.findIndex((candle, index) => index > lastPivotLow.index && candle.close < lastPivotLow.price - breakBuffer);
-    const priorHigh = [...pivotHighs].reverse().find((pivot) => pivot.index < lastPivotLow.index);
-    const swingHigh = priorHigh?.price ?? Math.max(...candles.slice(Math.max(0, lastPivotLow.index - 20), lastPivotLow.index + 1).map((c) => c.high));
-    const confirmingCandles = candles.slice(Math.max(0, breakIndex), candles.length).filter((candle) => candle.close < lastPivotLow.price).length;
-    const retestCandle = candles
-      .slice(Math.max(0, breakIndex))
-      .find((candle) => candle.high >= lastPivotLow.price - retestTolerance && candle.close <= lastPivotLow.price);
-    return {
-      direction: 'BEARISH',
-      breakType: confirmingCandles >= 2 ? 'DB' : 'IB',
-      breakIndex,
-      breakLevel: lastPivotLow.price,
-      swingHigh,
-      swingLow: lastPivotLow.price,
-      signalTime: retestCandle?.time ?? candles[Math.max(breakIndex, 0)]?.time ?? current.time,
-      status: retestCandle ? 'READY' : confirmingCandles >= 1 ? 'WAITING_RETEST' : 'WAITING_CB1',
-      cb1: confirmingCandles >= 1,
-    };
-  }
-
   return null;
 }
 
-// ──── Step 4: Calculate Fibonacci Levels ────
-function calculateFibonacciTP(
-  swingHigh: number,
-  swingLow: number,
-  direction: 'BULLISH' | 'BEARISH'
-): FMCBRLevel[] {
-  const range = Math.abs(swingHigh - swingLow);
-  const levels: FMCBRLevel[] = [];
+function detectCB1(candles: Candle[], breakIndex: number, direction: 'BULLISH' | 'BEARISH'): { time: number; price: number } | null {
+  // Find Point B (the first significant pullback/local extreme after the break)
+  let pointB = -1;
+  let pointBIndex = -1;
   
-  if (direction === 'BULLISH') {
-    // Setup = swing low, Base = swing high
-    const base = swingHigh;
-    const setup = swingLow;
-    
-    levels.push({
-      price: base,
-      label: 'Base',
-      type: 'base',
-      level: 'Base',
-    });
-    
-    levels.push({
-      price: setup,
-      label: 'Setup',
-      type: 'setup',
-      level: 'Setup',
-    });
-    
-    // TP Levels (extending upward from setup)
-    levels.push({
-      price: setup + (range * FIBONACCI_RATIOS.TP1),
-      label: 'TP1',
-      type: 'tp',
-      level: 'TP1',
-    });
-    
-    levels.push({
-      price: setup + (range * FIBONACCI_RATIOS.TP1_EXTENDED),
-      label: 'TP1 Ext',
-      type: 'tp',
-      level: 'TP1 Extended',
-    });
-    
-    levels.push({
-      price: setup + (range * FIBONACCI_RATIOS.TP2),
-      label: 'TP2',
-      type: 'tp',
-      level: 'TP2',
-    });
-    
-    levels.push({
-      price: setup + (range * FIBONACCI_RATIOS.TP2_EXTENDED),
-      label: 'TP2 Ext',
-      type: 'tp',
-      level: 'TP2 Extended',
-    });
-    
-    levels.push({
-      price: setup + (range * FIBONACCI_RATIOS.TP3),
-      label: 'TP3',
-      type: 'tp',
-      level: 'TP3',
-    });
-    
-    levels.push({
-      price: setup + (range * FIBONACCI_RATIOS.TP3_EXTENDED),
-      label: 'TP3 Ext',
-      type: 'tp',
-      level: 'TP3 Extended',
-    });
-  } else {
-    // BEARISH: Setup = swing high, Base = swing low
-    const base = swingLow;
-    const setup = swingHigh;
-    
-    levels.push({
-      price: base,
-      label: 'Base',
-      type: 'base',
-      level: 'Base',
-    });
-    
-    levels.push({
-      price: setup,
-      label: 'Setup',
-      type: 'setup',
-      level: 'Setup',
-    });
-    
-    // TP Levels (extending downward from setup)
-    levels.push({
-      price: setup - (range * FIBONACCI_RATIOS.TP1),
-      label: 'TP1',
-      type: 'tp',
-      level: 'TP1',
-    });
-    
-    levels.push({
-      price: setup - (range * FIBONACCI_RATIOS.TP1_EXTENDED),
-      label: 'TP1 Ext',
-      type: 'tp',
-      level: 'TP1 Extended',
-    });
-    
-    levels.push({
-      price: setup - (range * FIBONACCI_RATIOS.TP2),
-      label: 'TP2',
-      type: 'tp',
-      level: 'TP2',
-    });
-    
-    levels.push({
-      price: setup - (range * FIBONACCI_RATIOS.TP2_EXTENDED),
-      label: 'TP2 Ext',
-      type: 'tp',
-      level: 'TP2 Extended',
-    });
-    
-    levels.push({
-      price: setup - (range * FIBONACCI_RATIOS.TP3),
-      label: 'TP3',
-      type: 'tp',
-      level: 'TP3',
-    });
-    
-    levels.push({
-      price: setup - (range * FIBONACCI_RATIOS.TP3_EXTENDED),
-      label: 'TP3 Ext',
-      type: 'tp',
-      level: 'TP3 Extended',
-    });
+  for (let i = breakIndex + 1; i < candles.length - 1; i++) {
+    const c = candles[i];
+    if (direction === 'BULLISH') {
+      if (c.high > candles[i-1].high && c.high > candles[i+1].high) {
+        pointB = c.high;
+        pointBIndex = i;
+        break;
+      }
+    } else {
+      if (c.low < candles[i-1].low && c.low < candles[i+1].low) {
+        pointB = c.low;
+        pointBIndex = i;
+        break;
+      }
+    }
   }
   
-  return levels;
-}
-
-// ──── Step 5: Calculate Entry Levels ────
-function calculateFibonacciEntry(
-  swingHigh: number,
-  swingLow: number,
-  direction: 'BULLISH' | 'BEARISH'
-): { majorEntry: number; minorEntry: number } {
-  const range = Math.abs(swingHigh - swingLow);
+  if (pointBIndex === -1) return null;
   
-  if (direction === 'BULLISH') {
-    const base = swingHigh;
-    const distance = swingHigh - swingLow;
-    
-    return {
-      majorEntry: base - (distance * FIBONACCI_RATIOS.MAJOR_ENTRY), // 0.236
-      minorEntry: base - (distance * FIBONACCI_RATIOS.MINOR_ENTRY), // 0.382
-    };
-  } else {
-    const base = swingLow;
-    const distance = swingHigh - swingLow;
-    
-    return {
-      majorEntry: base + (distance * FIBONACCI_RATIOS.MAJOR_ENTRY), // 0.236
-      minorEntry: base + (distance * FIBONACCI_RATIOS.MINOR_ENTRY), // 0.382
-    };
+  const last = candles[candles.length - 1];
+  if (direction === 'BULLISH' && last.close > pointB) {
+    return { time: last.time, price: pointB };
+  } else if (direction === 'BEARISH' && last.close < pointB) {
+    return { time: last.time, price: pointB };
   }
+  
+  return null;
 }
 
 // ──── Main FMCBR Strategy ────
 export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
-  // CRITICAL: Use only closed candles to prevent repainting
   const closedCandles = candles.slice(0, candles.length - 1);
+  if (closedCandles.length < 50) return null;
+
   const requiredCandles = getFMCBRRequiredCandles(closedCandles);
-  if (!closedCandles || closedCandles.length < requiredCandles) {
-    return null;
-  }
-
-  const dataBase = closedCandles.length > requiredCandles
-    ? closedCandles.slice(-requiredCandles)
-    : closedCandles;
-
+  const dataBase = closedCandles.length > requiredCandles ? closedCandles.slice(-requiredCandles) : closedCandles;
   const intervalSeconds = inferIntervalSeconds(dataBase);
   const structurePeriodSeconds = getStructurePeriodSeconds(intervalSeconds);
-  const baseCloses = dataBase.map(c => c.close);
-  const ema200 = computeEMA(baseCloses, 200);
-  const currentPrice = baseCloses[baseCloses.length - 1];
-  const macroTrend = ema200 > 0 ? (currentPrice > ema200 ? 'BULL' : 'BEAR') : 'NEUTRAL';
   const structureCandles = aggregateCandles(dataBase, structurePeriodSeconds);
-  if (structureCandles.length < 30) {
-    return null;
-  }
+  
+  if (structureCandles.length < 15) return null;
 
   try {
-    const breakout = detectBreakout(structureCandles);
-    const pivots = findPivots(structureCandles);
-    const pivotHighs = pivots.filter((pivot) => pivot.type === 'high');
-    const pivotLows = pivots.filter((pivot) => pivot.type === 'low');
-    const srLevels = getNearestLevels(structureCandles[structureCandles.length - 1].close, pivotHighs, pivotLows);
-
+    const breakout = detectBreak(structureCandles);
     if (!breakout) {
+      const pivots = findPivots(structureCandles);
+      const srLevels = getNearestLevels(structureCandles[structureCandles.length-1].close, pivots.filter(p=>p.type==='high'), pivots.filter(p=>p.type==='low'));
       return {
         breakType: null,
         cb1: false,
         direction: null,
-        swingHigh: srLevels.find((level) => level.type === 'resistance')?.price ?? 0,
-        swingLow: srLevels.find((level) => level.type === 'support')?.price ?? 0,
+        swingHigh: 0,
+        swingLow: 0,
         base: 0,
         setup: 0,
         levels: srLevels,
@@ -491,54 +327,65 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
       };
     }
 
-    const { direction, breakType, swingHigh, swingLow, status, cb1, signalTime } = breakout;
+    const cb1Data = detectCB1(structureCandles, breakout.index, breakout.direction);
+    const cb1Detected = !!cb1Data;
+    
+    const { direction, type, swingHigh, swingLow } = breakout;
+    const range = Math.abs(swingHigh - swingLow);
+    
+    // Official Formula: Price = Base + (Range * Ratio)
+    // Bullish: Base = swingLow, Setup = swingHigh
+    // Bearish: Base = swingHigh, Setup = swingLow
+    const basePrice = direction === 'BULLISH' ? swingLow : swingHigh;
+    const setupPrice = direction === 'BULLISH' ? swingHigh : swingLow;
 
-    if (direction === 'BULLISH' && macroTrend === 'BEAR') {
-      return { breakType: null, cb1: false, direction: null, swingHigh: 0, swingLow: 0, base: 0, setup: 0, levels: srLevels, entryMajor: 0, entryMinor: 0, status: 'WAITING_BREAK' };
-    }
-    if (direction === 'BEARISH' && macroTrend === 'BULL') {
-      return { breakType: null, cb1: false, direction: null, swingHigh: 0, swingLow: 0, base: 0, setup: 0, levels: srLevels, entryMajor: 0, entryMinor: 0, status: 'WAITING_BREAK' };
-    }
-
-    const tpLevels = calculateFibonacciTP(swingHigh, swingLow, direction);
-    const entryLevels = calculateFibonacciEntry(swingHigh, swingLow, direction);
-
-    const allLevels: FMCBRLevel[] = [
-      ...tpLevels,
-      {
-        price: entryLevels.majorEntry,
-        label: 'Major Entry (23.6%)',
-        type: 'entry',
-        level: 'Major Entry',
-      },
-      {
-        price: entryLevels.minorEntry,
-        label: 'Minor Entry (38.2%)',
-        type: 'entry',
-        level: 'Minor Entry',
-      },
-      ...srLevels,
+    const levels: FMCBRLevel[] = [
+      { price: basePrice, label: 'Base', type: 'base', level: 'Base' },
+      { price: setupPrice, label: 'Setup', type: 'setup', level: 'Setup' },
     ];
 
-    const base = direction === 'BULLISH' ? swingHigh : swingLow;
-    const setup = direction === 'BULLISH' ? swingLow : swingHigh;
+    // TP Levels
+    const tpRatios = [
+      { r: FIBONACCI_RATIOS.TP1, l: 'TP1' },
+      { r: FIBONACCI_RATIOS.TP1_EXTENDED, l: 'TP1 Ext' },
+      { r: FIBONACCI_RATIOS.TP2, l: 'TP2' },
+      { r: FIBONACCI_RATIOS.TP2_EXTENDED, l: 'TP2 Ext' },
+      { r: FIBONACCI_RATIOS.TP3, l: 'TP3' },
+      { r: FIBONACCI_RATIOS.TP3_EXTENDED, l: 'TP3 Ext' },
+    ];
+
+    for (const { r, l } of tpRatios) {
+      const price = direction === 'BULLISH' ? basePrice + (range * r) : basePrice - (range * r);
+      levels.push({ price, label: l, type: 'tp', level: l });
+    }
+
+    // Entry Levels
+    const majorEntry = direction === 'BULLISH' ? basePrice + (range * FIBONACCI_RATIOS.MAJOR_ENTRY) : basePrice - (range * FIBONACCI_RATIOS.MAJOR_ENTRY);
+    const minorEntry = direction === 'BULLISH' ? basePrice + (range * FIBONACCI_RATIOS.MINOR_ENTRY) : basePrice - (range * FIBONACCI_RATIOS.MINOR_ENTRY);
+    
+    levels.push({ price: majorEntry, label: 'Major Entry (23.6%)', type: 'entry', level: 'Major Entry' });
+    levels.push({ price: minorEntry, label: 'Minor Entry (38.2%)', type: 'entry', level: 'Minor Entry' });
+
+    // Pivot SR context
+    const pivots = findPivots(structureCandles);
+    const srLevels = getNearestLevels(structureCandles[structureCandles.length-1].close, pivots.filter(p=>p.type==='high'), pivots.filter(p=>p.type==='low'));
 
     return {
-      breakType,
-      cb1,
+      breakType: type,
+      cb1: cb1Detected,
       direction,
       swingHigh,
       swingLow,
-      base,
-      setup,
-      levels: allLevels.sort((a, b) => a.price - b.price),
-      entryMajor: entryLevels.majorEntry,
-      entryMinor: entryLevels.minorEntry,
-      status,
-      signalTime,
+      base: basePrice,
+      setup: setupPrice,
+      levels: [...levels, ...srLevels].sort((a, b) => a.price - b.price),
+      entryMajor,
+      entryMinor,
+      status: cb1Detected ? 'READY' : 'WAITING_CB1',
+      signalTime: structureCandles[structureCandles.length - 1].time,
     };
-  } catch (error) {
-    console.error('Error calculating FMCBR:', error);
+  } catch (err) {
+    console.error('FMCBR error:', err);
     return null;
   }
 }

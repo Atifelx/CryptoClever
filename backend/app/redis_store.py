@@ -161,7 +161,7 @@ async def close_redis() -> None:
 
 
 SIGNALS_KEY_PREFIX = "indicators:"
-SIGNALS_TTL = 60
+SIGNALS_TTL = 300  # 5 minutes — all users see same analysis, prevents flip-flop
 
 
 async def get_store_keys_info() -> dict[str, dict[str, Any]]:

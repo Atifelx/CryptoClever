@@ -22,6 +22,7 @@ import { formatIST } from '../../lib/utils/time';
 import CoreEngineOverlay from './CoreEngineOverlay';
 import AIPredictionOverlay from './AIPredictionOverlay';
 import FMCBRArrowOverlay from './FMCBRArrowOverlay';
+import AISignalArrowOverlay from './AISignalArrowOverlay';
 
 interface TradingChartProps {
   symbol: string;
@@ -65,12 +66,12 @@ export default function TradingChart({
   const lastCandle = candles.length > 0 ? candles[candles.length - 1] : null;
   const lastCandleAgeSeconds = lastCandle ? Math.max(0, Math.floor(Date.now() / 1000) - lastCandle.time) : null;
   const connectionLabel = isForexSymbol
-    ? '15m Updates'
+    ? '5m Updates'
     : isConnected
       ? 'Live'
       : 'Disconnected';
   const priceStatusLabel = isForexSymbol
-    ? '15M'
+    ? '5M'
     : isConnected
       ? 'LIVE'
       : 'Disconnected';
@@ -492,9 +493,9 @@ export default function TradingChart({
     // Per HLD: never apply another symbol's candles. If price range doesn't match current symbol, skip (handles WS/store race).
     const expectedRanges: Record<string, [number, number]> = {
       BTCUSDT: [1000, 500_000],
-      SOLUSDT: [1, 10_000],
-      BNBUSDT: [10, 10_000],
-      XRPUSDT: [0.01, 100],
+      ETHUSDT: [100, 50_000],
+      'C:XAUUSD': [100, 10_000],
+      'C:GBPJPY': [10, 1000],
     };
     const range = expectedRanges[symbol];
     if (range && candles.length > 0) {
@@ -797,6 +798,16 @@ export default function TradingChart({
             containerRef={chartContainerRef}
             signal={fmcbrSignal}
             visible={isEnabled('fmcbr')}
+          />
+
+          {/* AI Signal Range Arrows — Scalp & Long trade visual on chart */}
+          <AISignalArrowOverlay
+            chart={chartRef.current}
+            candleSeries={candleSeriesRef.current}
+            containerRef={chartContainerRef}
+            scalpTrade={keepLiveAnalysis ? (coreEngineAnalysis?.prediction?.scalpTrade ?? null) : null}
+            longTrade={keepLiveAnalysis ? (coreEngineAnalysis?.prediction?.longTrade ?? null) : null}
+            visible={keepLiveAnalysis}
           />
         </div>
         

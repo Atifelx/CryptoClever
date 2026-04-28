@@ -15,7 +15,7 @@ from app.ws_broadcast import broadcast_candle, broadcast_candle_proposal
 
 logger = logging.getLogger(__name__)
 
-# Track partial 15m candle per symbol for aggregation
+# Track partial 5m candle per symbol for aggregation
 # symbol -> { "time": ts, "open": o, "high": h, "low": l, "close": c, "volume": v, "count": n }
 _partial_candles: dict[str, dict[str, Any]] = {}
 
@@ -26,7 +26,7 @@ _BOOTSTRAP_BACKOFF_SECONDS = 12
 _POLLER_LOOKBACK_DAYS = 2
 _BOOTSTRAP_FETCH_LIMIT = 900
 _POLL_BUFFER_SECONDS = 20
-_FOREX_INTERVAL = "15m"
+_FOREX_INTERVAL = "5m"
 
 def _massive_to_candle(m: dict[str, Any]) -> dict[str, Any]:
     """Convert Massive aggregate minute (AM) payload to our candle format."""
@@ -54,7 +54,7 @@ def _merge_candle_lists(*lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def _fetch_massive_range(
     symbol: str,
     *,
-    multiplier: int = 15,
+    multiplier: int = 5,
     timespan: str = "minute",
     days: int = _BOOTSTRAP_LOOKBACK_DAYS,
     limit: int = _BOOTSTRAP_FETCH_LIMIT,
@@ -111,10 +111,10 @@ async def _fetch_massive_range(
     return []
 
 
-def _seconds_until_next_15m_close(buffer_seconds: int = _POLL_BUFFER_SECONDS) -> float:
-    """Sleep until just after the next 15m bar should be available."""
+def _seconds_until_next_5m_close(buffer_seconds: int = _POLL_BUFFER_SECONDS) -> float:
+    """Sleep until just after the next 5m bar should be available."""
     now = datetime.utcnow()
-    next_minute = ((now.minute // 15) + 1) * 15
+    next_minute = ((now.minute // 5) + 1) * 5
     if next_minute >= 60:
         next_bar = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     else:
@@ -123,7 +123,7 @@ def _seconds_until_next_15m_close(buffer_seconds: int = _POLL_BUFFER_SECONDS) ->
     return max((wake_at - now).total_seconds(), 5.0)
 
 async def bootstrap_forex_symbol(symbol: str) -> None:
-    """Fetch last 1000 15m aggregates from Massive REST and write to Redis."""
+    """Fetch last 1000 5m aggregates from Massive REST and write to Redis."""
     logger.info("[MASSIVE_BOOTSTRAP] Fetching %s history", symbol)
     all_results = await _fetch_massive_range(symbol)
     if not all_results:
@@ -192,7 +192,7 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
                 await bootstrap_forex_symbol(symbol)
                 existing = await get_candles(symbol, _FOREX_INTERVAL, limit=1000)
 
-            # Fetch the latest closed 15m candle only once per 15m boundary.
+            # Fetch the latest closed 5m candle only once per 5m boundary.
             results = await _fetch_massive_range(
                 symbol,
                 days=_POLLER_LOOKBACK_DAYS,
@@ -227,4 +227,4 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
         except Exception as e:
             logger.warning("[MASSIVE_REST_POLLER] Polling error (%s): %s", symbol, e)
         
-        await asyncio.sleep(_seconds_until_next_15m_close())
+        await asyncio.sleep(_seconds_until_next_5m_close())

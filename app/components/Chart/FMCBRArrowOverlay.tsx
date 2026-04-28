@@ -48,38 +48,29 @@ export default function FMCBRArrowOverlay({
 
     const updateLayout = () => {
       const timeScale = chart.timeScale();
-      const signalTime = signal.signalTime;
+      const seriesData = candleSeries.data();
+      if (!seriesData || seriesData.length === 0) return;
       
-      if (!signalTime) {
+      const lastCandle = seriesData[seriesData.length - 1];
+      const lastX = timeScale.timeToCoordinate(lastCandle.time);
+      
+      if (lastX === null || Number.isNaN(lastX)) {
         setLayout(null);
         return;
       }
 
-      const startX = timeScale.timeToCoordinate(signalTime as Time);
-      if (startX === null || Number.isNaN(startX)) {
-        setLayout(null);
-        return;
-      }
-
-      // Calculate vertical range: from Base/Setup to TP1 or TP3
       const isUp = signal.direction === 'BULLISH';
-      const startPrice = isUp ? signal.swingLow : signal.swingHigh;
       
-      // Target price: use TP1 or TP3 depending on what's available
-      const tpLevel = signal.levels.find(l => l.level === 'TP1')?.price || 
-                      signal.levels.find(l => l.level === 'TP3')?.price || 
-                      (isUp ? signal.swingHigh * 1.02 : signal.swingLow * 0.98);
+      // Position the arrow just after the last candle (in the "future" space)
+      // Anchor it near the latest price action as per user's screenshot
+      const startX = lastX + 30;
+      const endX = lastX + 160;
       
-      const startY = candleSeries.priceToCoordinate(startPrice);
-      const endY = candleSeries.priceToCoordinate(tpLevel);
-
-      if (startY === null || endY === null || Number.isNaN(startY) || Number.isNaN(endY)) {
-        setLayout(null);
-        return;
-      }
-
-      // Diagonal offset: point the arrow 60 pixels to the right
-      const endX = startX + 60;
+      // Vertical placement near the top, aligned with the price/trend indicator area
+      const baseY = 70;
+      // Bullish points UP (smaller Y), Bearish points DOWN (larger Y)
+      const startY = isUp ? baseY + 40 : baseY - 40;
+      const endY = isUp ? baseY - 40 : baseY + 40;
 
       setLayout({
         startX,
@@ -119,11 +110,11 @@ export default function FMCBRArrowOverlay({
   const height = maxY - minY;
 
   const accentColor = isUp ? '#00ffcc' : '#ff3366';
-  const glowColor = isUp ? 'rgba(0, 255, 204, 0.5)' : 'rgba(255, 51, 102, 0.5)';
+  const glowColor = isUp ? 'rgba(0, 255, 204, 0.4)' : 'rgba(255, 51, 102, 0.4)';
 
   // Arrowhead math
   const angle = Math.atan2(endY - startY, endX - startX);
-  const headSize = 18;
+  const headSize = 22; // Slightly larger head
   const x1 = endX - headSize * Math.cos(angle - Math.PI / 6);
   const y1 = endY - headSize * Math.sin(angle - Math.PI / 6);
   const x2 = endX - headSize * Math.cos(angle + Math.PI / 6);
@@ -135,12 +126,13 @@ export default function FMCBRArrowOverlay({
         width="100%"
         height="100%"
         className="absolute inset-0 overflow-visible"
-        style={{ filter: 'drop-shadow(0 0 12px ' + glowColor + ')' }}
+        style={{ filter: 'drop-shadow(0 0 15px ' + glowColor + ')' }}
       >
         <defs>
-          <linearGradient id={`grad-${direction}`} x1={startX} y1={startY} x2={endX} y2={endY} gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor={accentColor} stopOpacity="0.1" />
-            <stop offset="100%" stopColor={accentColor} stopOpacity="0.9" />
+          <linearGradient id={`grad-${direction}`} x1="0%" y1="100%" x2="0%" y2="0%">
+            {/* Gradient from bottom to top as requested */}
+            <stop offset="0%" stopColor={accentColor} stopOpacity="0.05" />
+            <stop offset="100%" stopColor={accentColor} stopOpacity="0.5" />
           </linearGradient>
         </defs>
 
@@ -151,7 +143,7 @@ export default function FMCBRArrowOverlay({
           x2={endX}
           y2={endY}
           stroke={`url(#grad-${direction})`}
-          strokeWidth="6"
+          strokeWidth="10" 
           strokeLinecap="round"
           className="animate-pulse"
         />
@@ -160,17 +152,17 @@ export default function FMCBRArrowOverlay({
         <path
           d={`M ${endX} ${endY} L ${x1} ${y1} L ${x2} ${y2} Z`}
           fill={accentColor}
-          fillOpacity="0.9"
+          fillOpacity="0.5"
           className="animate-pulse"
         />
 
-        {/* Label near the end of the arrow */}
-        <foreignObject x={endX + 10} y={endY - 10} width="150" height="40">
-          <div className="flex items-center gap-2">
+        {/* Label near the end of the arrow - also semi-transparent */}
+        <foreignObject x={endX + 10} y={endY - 15} width="160" height="45">
+          <div className="flex items-center gap-2 opacity-80">
             <div 
-              className="rounded-full px-2 py-0.5 text-[11px] font-black italic tracking-tighter text-white shadow-xl backdrop-blur-md"
+              className="rounded-full px-2 py-1 text-[11px] font-black italic tracking-tighter text-white shadow-xl backdrop-blur-md"
               style={{ 
-                background: `linear-gradient(90deg, ${accentColor} 0%, rgba(0,0,0,0.8) 100%)`,
+                background: `linear-gradient(90deg, ${accentColor}CC 0%, rgba(0,0,0,0.6) 100%)`,
                 border: `1px solid ${accentColor}88`
               }}
             >

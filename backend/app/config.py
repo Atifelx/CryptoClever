@@ -9,20 +9,16 @@ load_dotenv()
 SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
-    "SOLUSDT",
-    "BNBUSDT",
-    "XRPUSDT",
     "C:XAUUSD",
-    "C:EURUSD",
-    "C:USDJPY",
+    "C:GBPJPY",
 ]
 
 # Separate Forex symbols for provider routing
-FOREX_SYMBOLS = ["C:XAUUSD", "C:EURUSD", "C:USDJPY"]
-CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+FOREX_SYMBOLS = ["C:XAUUSD", "C:GBPJPY"]
+CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 
-# Only 15m interval for minimal server load
-INTERVALS = ["15m"]
+# Only 5m interval for minimal server load
+INTERVALS = ["5m"]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # Set to "1" or "true" to use in-memory store instead of Redis (no Redis needed for local testing)
