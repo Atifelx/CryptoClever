@@ -21,6 +21,7 @@ import CandleSizeControl from './CandleSizeControl';
 import { formatIST } from '../../lib/utils/time';
 import CoreEngineOverlay from './CoreEngineOverlay';
 import AIPredictionOverlay from './AIPredictionOverlay';
+import FMCBRArrowOverlay from './FMCBRArrowOverlay';
 
 interface TradingChartProps {
   symbol: string;
@@ -788,6 +789,14 @@ export default function TradingChart({
             showTrend={isEnabled('trendIndicator')}
             scalpSignals={isEnabled('scalpSignal') ? scalpSignals : []}
             showScalp={isEnabled('scalpSignal')}
+          />
+
+          <FMCBRArrowOverlay
+            chart={chartRef.current}
+            candleSeries={candleSeriesRef.current}
+            containerRef={chartContainerRef}
+            signal={fmcbrSignal}
+            visible={isEnabled('fmcbr')}
           />
         </div>
         

@@ -250,61 +250,12 @@ export default function UnifiedMarkerManager({
       }
     }
 
-    // ──── FMCBR CORE ENGINE MARKERS (circle + directional arrow, same design as Semafor) ────
+    // ──── FMCBR CORE ENGINE MARKERS (REMOVED: Now handled by FMCBRArrowOverlay for cleaner UI) ────
+    /*
     if (showFMCBR && fmcbrSignal) {
-      const { levels, direction, breakType, cb1 } = fmcbrSignal;
-
-      const colors = {
-        bullish: { entry: '#00ff66', tp: '#ffaa00', base: '#ff2222', setup: '#00aaff' },
-        bearish: { entry: '#ff2222', tp: '#ffaa00', base: '#00ff66', setup: '#00aaff' },
-      };
-      const scheme = direction === 'BULLISH' ? colors.bullish : colors.bearish;
-
-      let referenceTime: number | null = fmcbrSignal.signalTime ?? currentCandleTime ?? null;
-      if (referenceTime === null) {
-        if (semaforPoints.length > 0) referenceTime = semaforPoints[semaforPoints.length - 1].time;
-        else if (scalpSignals.length > 0) referenceTime = scalpSignals[scalpSignals.length - 1].time;
-        else if (trendMarker) referenceTime = trendMarker.time;
-      }
-
-      if (referenceTime !== null) {
-        const statusColor = fmcbrSignal.status === 'READY' ? '#00ff66' :
-          fmcbrSignal.status === 'WAITING_CB1' ? '#ffaa00' :
-          fmcbrSignal.status === 'WAITING_RETEST' ? '#ff6600' : '#888888';
-
-        const hasSignal = (direction === 'BULLISH' || direction === 'BEARISH') && (breakType === 'IB' || breakType === 'DB');
-        const signalLabel = direction === 'BULLISH' ? 'LONG' : direction === 'BEARISH' ? 'SHORT' : null;
-
-        // 1) Circle — when we already have LONG/SHORT signal, show clean label only (no "Waiting" text)
-        const statusText = hasSignal && signalLabel
-          ? (fmcbrSignal.status === 'READY' ? `FMCBR ${signalLabel} (${breakType}) CB1 ✓` : `FMCBR ${signalLabel} (${breakType})`)
-          : `FMCBR: ${fmcbrSignal.status}${breakType ? ` (${breakType})` : ''}${cb1 ? ' CB1✓' : ''}`;
-        allMarkers.push({
-          time: referenceTime as any,
-          position: 'belowBar',
-          color: statusColor,
-          shape: 'circle',
-          size: 1.8,
-          text: statusText,
-        });
-
-        // 2) Directional arrow — show as soon as we have break + direction
-        if (hasSignal) {
-          const isUp = direction === 'BULLISH';
-          allMarkers.push({
-            time: referenceTime as any,
-            position: 'belowBar',
-            color: isUp ? '#80ffbb' : '#ff9999',
-            shape: isUp ? 'arrowUp' : 'arrowDown',
-            size: 1.4,
-            text: isUp ? 'FMCBR LONG' : 'FMCBR SHORT',
-          });
-        }
-
-        // Level circles removed to avoid blocking candles (horizontal lines in FMCBROverlay remain)
-        // When we have LONG/SHORT signal, do not add "Waiting for cb1..." — keeps chart clean
-      }
+      ...
     }
+    */
 
     // Sort all markers: time → position → shape
     const posOrder = { 'aboveBar': 0, 'inBar': 1, 'belowBar': 2 };
