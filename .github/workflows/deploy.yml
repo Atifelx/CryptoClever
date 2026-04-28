@@ -168,6 +168,31 @@ jobs:
             # Pull and restart
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
+
+            # Verify services from inside the VM before reporting success.
+            for endpoint in \
+              http://127.0.0.1:3000 \
+              http://127.0.0.1:8000/health \
+              http://127.0.0.1:8010/health; do
+              echo "Checking $endpoint"
+              for attempt in $(seq 1 12); do
+                if curl -fsS "$endpoint"; then
+                  echo
+                  break
+                fi
+                if [ "$attempt" = "12" ]; then
+                  echo "Health check failed for $endpoint"
+                  docker compose -f docker-compose.prod.yml ps
+                  docker compose -f docker-compose.prod.yml logs --tail=80
+                  exit 1
+                fi
+                sleep 5
+              done
+            done
+
+            echo "Checking Core Engine signal endpoint"
+            curl -fsS http://127.0.0.1:8000/signals/BTCUSDT/15m | head -c 1200
+            echo
             
             # Cleanup old images
             docker image prune -af
