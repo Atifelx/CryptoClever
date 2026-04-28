@@ -1156,7 +1156,11 @@ async def signals(symbol: str, interval: str):
     interval = interval.lower() if interval.upper() != "1D" else "1d"
     symbol = symbol.upper()
     cached = await get_signals(symbol, interval)
-    if cached:
+    if cached and not (
+        CORE_ENGINE_USE_AI
+        and AI_ENGINE_URL
+        and cached.get("analysisSource") != "ai-engine"
+    ):
         return cached
     if CORE_ENGINE_USE_AI and AI_ENGINE_URL:
         try:

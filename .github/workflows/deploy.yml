@@ -94,6 +94,13 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd ~/SmartTrade
+            set -e
+            show_deploy_debug() {
+              docker compose -f docker-compose.prod.yml ps || true
+              docker compose -f docker-compose.prod.yml logs --tail=120 || true
+            }
+            trap show_deploy_debug ERR
+
             REPO_LC=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')
             # Update the production compose file
             cat <<EOF > docker-compose.prod.yml
@@ -176,23 +183,54 @@ jobs:
               http://127.0.0.1:8010/health; do
               echo "Checking $endpoint"
               for attempt in $(seq 1 12); do
-                if curl -fsS "$endpoint"; then
+                if curl -fsS -o /tmp/deploy-health-check "$endpoint"; then
+                  head -c 300 /tmp/deploy-health-check
                   echo
                   break
                 fi
                 if [ "$attempt" = "12" ]; then
                   echo "Health check failed for $endpoint"
-                  docker compose -f docker-compose.prod.yml ps
-                  docker compose -f docker-compose.prod.yml logs --tail=80
                   exit 1
                 fi
                 sleep 5
               done
             done
 
+            echo "Checking AI Engine analysis endpoint"
+            curl -fsS http://127.0.0.1:8010/analyze/BTCUSDT/15m > /tmp/ai-analysis.json
+            python3 - <<'PY'
+            import json
+            from pathlib import Path
+
+            payload = json.loads(Path("/tmp/ai-analysis.json").read_text())
+            print(json.dumps({
+                "analysisSource": payload.get("analysisSource"),
+                "aiPowered": payload.get("aiPowered"),
+                "model": payload.get("model"),
+                "direction": (payload.get("prediction") or {}).get("direction"),
+                "confidence": payload.get("confidence"),
+            }))
+            if payload.get("analysisSource") != "ai-engine" or payload.get("aiPowered") is not True:
+                raise SystemExit("AI engine analyze endpoint did not return an Azure-powered analysis")
+            PY
+
             echo "Checking Core Engine signal endpoint"
-            curl -fsS http://127.0.0.1:8000/signals/BTCUSDT/15m | head -c 1200
-            echo
+            curl -fsS http://127.0.0.1:8000/signals/BTCUSDT/15m > /tmp/backend-signal.json
+            python3 - <<'PY'
+            import json
+            from pathlib import Path
+
+            payload = json.loads(Path("/tmp/backend-signal.json").read_text())
+            print(json.dumps({
+                "analysisSource": payload.get("analysisSource"),
+                "aiPowered": payload.get("aiPowered"),
+                "model": payload.get("model"),
+                "direction": (payload.get("prediction") or {}).get("direction"),
+                "confidence": payload.get("confidence"),
+            }))
+            if payload.get("analysisSource") != "ai-engine":
+                raise SystemExit("Backend signal endpoint did not return the AI engine response")
+            PY
             
             # Cleanup old images
             docker image prune -af
