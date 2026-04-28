@@ -157,10 +157,10 @@ export default function LiveAnalysisToggle() {
       // Fetch immediately
       fetchAnalysisRef.current();
 
-      // Then poll every 5 minutes (matches backend cache TTL)
+      // Then poll every 10 minutes (matches backend cache TTL)
       pollingIntervalRef.current = setInterval(() => {
         fetchAnalysisRef.current();
-      }, 300000); // 5 minutes — prevents flip-flop signals
+      }, 600000); // 10 minutes — AI runs 6x/hour, cached data served between runs
 
       return () => {
         console.log('⏹️ Stopping Core Engine polling');
@@ -432,7 +432,7 @@ export default function LiveAnalysisToggle() {
             }`}>{analysis.prediction.newsBias}</span></span>
             <span>Horizon: <span className="text-gray-400">{analysis.prediction.horizon}</span></span>
             <span>Source: <span className="text-gray-400">{analysis.aiPowered ? 'Azure AI' : 'Fallback Engine'}</span></span>
-            <span>Updates: <span className="text-gray-400">Every 5 min</span></span>
+            <span>Updates: <span className="text-gray-400">Every 10 min</span></span>
           </div>
         </div>
       )}

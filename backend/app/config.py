@@ -10,11 +10,10 @@ SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
     "C:XAUUSD",
-    "C:GBPJPY",
 ]
 
 # Separate Forex symbols for provider routing
-FOREX_SYMBOLS = ["C:XAUUSD", "C:GBPJPY"]
+FOREX_SYMBOLS = ["C:XAUUSD"]
 CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 
 # Only 5m interval for minimal server load

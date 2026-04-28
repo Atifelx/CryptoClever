@@ -9,7 +9,7 @@ interface TimeframeSelectorProps {
 
 /**
  * Renders indicator selector. Core Engine moved to Navbar (top bar).
- * Timeframe is fixed to 15m (no UI selector).
+ * Timeframe is fixed to 5m (no UI selector).
  */
 export default function TimeframeSelector({
   enabledIndicators,
