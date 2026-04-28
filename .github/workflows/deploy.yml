@@ -1,4 +1,6 @@
+# Deployment triggered by Antigravity on 2026-04-28
 name: Deploy to Azure VM
+
 
 on:
   push:
