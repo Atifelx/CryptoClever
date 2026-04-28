@@ -198,7 +198,7 @@ jobs:
               done
             done
 
-            echo "Checking AI Engine analysis endpoint (with retries — needs candle bootstrap)"
+            echo "Checking AI Engine analysis endpoint (with retries)"
             AI_OK=false
             for attempt in $(seq 1 6); do
               if curl -fsS http://127.0.0.1:8010/analyze/BTCUSDT/5m > /tmp/ai-analysis.json 2>/dev/null; then
@@ -209,26 +209,13 @@ jobs:
               sleep 10
             done
             if [ "$AI_OK" = "true" ]; then
-              python3 - <<'PY'
-import json
-from pathlib import Path
-
-payload = json.loads(Path("/tmp/ai-analysis.json").read_text())
-print(json.dumps({
-    "analysisSource": payload.get("analysisSource"),
-    "aiPowered": payload.get("aiPowered"),
-    "model": payload.get("model"),
-    "direction": (payload.get("prediction") or {}).get("direction"),
-    "confidence": payload.get("confidence"),
-}))
-if payload.get("analysisSource") != "ai-engine":
-    print("WARNING: AI engine returned non-AI analysis (may be cold start)")
-PY
+              echo "AI Engine analysis response:"
+              python3 -c "import json; d=json.load(open('/tmp/ai-analysis.json')); print(json.dumps({k: d.get(k) for k in ['analysisSource','aiPowered','confidence']}))"
             else
               echo "WARNING: AI engine analysis not available yet (will work after candle bootstrap)"
             fi
 
-            echo "Checking Core Engine signal endpoint"
+            echo "Checking Core Engine signal endpoint (with retries)"
             SIGNAL_OK=false
             for attempt in $(seq 1 6); do
               if curl -fsS http://127.0.0.1:8000/signals/BTCUSDT/5m > /tmp/backend-signal.json 2>/dev/null; then
@@ -239,22 +226,12 @@ PY
               sleep 10
             done
             if [ "$SIGNAL_OK" = "true" ]; then
-              python3 - <<'PY'
-import json
-from pathlib import Path
-
-payload = json.loads(Path("/tmp/backend-signal.json").read_text())
-print(json.dumps({
-    "analysisSource": payload.get("analysisSource"),
-    "aiPowered": payload.get("aiPowered"),
-    "model": payload.get("model"),
-    "direction": (payload.get("prediction") or {}).get("direction"),
-    "confidence": payload.get("confidence"),
-}))
-PY
+              echo "Backend signal response:"
+              python3 -c "import json; d=json.load(open('/tmp/backend-signal.json')); print(json.dumps({k: d.get(k) for k in ['analysisSource','aiPowered','confidence']}))"
             else
               echo "WARNING: Signal endpoint not ready yet (will work after candle bootstrap)"
             fi
             
             # Cleanup old images
             docker image prune -af
+
