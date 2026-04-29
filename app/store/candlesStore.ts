@@ -28,7 +28,7 @@ interface CandlesState {
   mergeBtcCandle: (candle: Candle) => void;
 }
 
-const MAX_CANDLES_PER_SYMBOL = 1001;
+const MAX_CANDLES_PER_SYMBOL = 2001; // Match backend 2k buffer
 
 /** Stable empty array so getCandlesForSymbol(symbol) doesn't return new [] each time (avoids infinite re-renders when symbol has no data). */
 const EMPTY_CANDLES: Candle[] = [];
@@ -37,16 +37,22 @@ export const useCandlesStore = create<CandlesState>((set, get) => ({
   candlesBySymbol: {},
 
   setCandlesForSymbol: (symbol, candles) => {
+    // SANITIZATION: Remove any corrupted 0-price candles
+    const cleanCandles = candles.filter(c => c.open > 0 && c.high > 0 && c.low > 0 && c.close > 0);
+    
     set((state) => ({
       candlesBySymbol: {
         ...state.candlesBySymbol,
-        [symbol]: candles.length ? [...candles] : [],
+        [symbol]: cleanCandles.length ? [...cleanCandles] : [],
       },
-      ...(symbol === 'BTCUSDT' ? { btcCandles: candles.length ? [...candles] : [] } : {}),
+      ...(symbol === 'BTCUSDT' ? { btcCandles: cleanCandles.length ? [...cleanCandles] : [] } : {}),
     }));
   },
 
   mergeCandleForSymbol: (symbol, candle) => {
+    // SANITIZATION: Ignore garbage 0-price candles from live feed
+    if (candle.open <= 0 || candle.high <= 0 || candle.low <= 0 || candle.close <= 0) return;
+
     set((state) => {
       const prev = state.candlesBySymbol[symbol] ?? [];
       const time = candle.time;
