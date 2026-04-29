@@ -54,15 +54,27 @@ async def _fetch_twelvedata_series(symbol: str, interval: str, outputsize: int) 
 def _rows_to_candles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     candles: list[dict[str, Any]] = []
     for row in reversed(rows):
-        candles.append({
-            "time": _parse_twelvedata_time(row["datetime"]),
-            "open": float(row["open"]),
-            "high": float(row["high"]),
-            "low": float(row["low"]),
-            "close": float(row["close"]),
-            "volume": float(row.get("volume") or 0),
-            "is_closed": True,
-        })
+        try:
+            o = float(row["open"])
+            h = float(row["high"])
+            l = float(row["low"])
+            c = float(row["close"])
+            
+            # SANITIZATION: Skip garbage candles with 0 or negative prices
+            if o <= 0 or h <= 0 or l <= 0 or c <= 0:
+                continue
+                
+            candles.append({
+                "time": _parse_twelvedata_time(row["datetime"]),
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+                "volume": float(row.get("volume") or 0),
+                "is_closed": True,
+            })
+        except (ValueError, KeyError):
+            continue
     return candles
 
 async def bootstrap_forex_symbol(symbol: str) -> None:

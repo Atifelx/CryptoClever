@@ -137,15 +137,26 @@ async def bootstrap_forex_symbol(symbol: str) -> None:
     
     candles = []
     for res in all_results:
-        candles.append({
-            "time": int(res["t"]) // 1000,
-            "open": float(res["o"]),
-            "high": float(res["h"]),
-            "low": float(res["l"]),
-            "close": float(res["c"]),
-            "volume": float(res["v"]),
-            "is_closed": True, # CRITICAL: explicitly set for indicators (Semafor) to accept it
-        })
+        try:
+            o = float(res["o"])
+            h = float(res["h"])
+            l = float(res["l"])
+            c = float(res["c"])
+            
+            if o <= 0 or h <= 0 or l <= 0 or c <= 0:
+                continue
+
+            candles.append({
+                "time": int(res["t"]) // 1000,
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+                "volume": float(res["v"]),
+                "is_closed": True,
+            })
+        except (ValueError, KeyError):
+            continue
     
     if candles:
         existing = await get_candles(symbol, _FOREX_INTERVAL, limit=2000)

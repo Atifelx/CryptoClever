@@ -526,7 +526,7 @@ export function calculateSemafor(
   }
 
   try {
-    const data = candles.length > 500 ? candles.slice(-500) : candles;
+    const data = candles.length > 2000 ? candles.slice(-2000) : candles;
 
     // Adaptive deviation based on volatility
     const deviation = getAdaptiveDeviation(data, timeframe);
@@ -618,7 +618,7 @@ export function getSemaforTrend(candles: Candle[]): SemaforTrend {
     return { trend: 'NEUTRAL', ema20: 0, ema50: 0 };
   }
 
-  const data = candles.length > 500 ? candles.slice(-500) : candles;
+  const data = candles.length > 2000 ? candles.slice(-2000) : candles;
   // Use closes of CLOSED candles only (exclude the forming candle)
   const closedCloses = data.slice(0, data.length - 1).map(c => c.close);
   const ema20 = computeEMA(closedCloses, 20);

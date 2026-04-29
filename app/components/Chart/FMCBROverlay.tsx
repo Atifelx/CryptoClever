@@ -48,9 +48,16 @@ export default function FMCBROverlay({
 
     const { levels, direction, breakType, cb1 } = signal;
 
-    // LOCALIZED MODE: Only render Base and Setup as full-width context lines.
-    // TP and Entry targets are now rendered as short localized segments in FMCBRArrowOverlay.
-    const visibleLevels = levels.filter(level => level.type === 'base' || level.type === 'setup');
+    // Safety Guard: Only render levels that are within 20% of the current price.
+    // This prevents extreme historical pivots from stretching the vertical scale (the "flat candle" bug).
+    const currentPrice = signal.levels.find(l => l.type === 'base')?.price || 0;
+    const visibleLevels = levels.filter(level => {
+      const isBaseOrSetup = level.type === 'base' || level.type === 'setup';
+      if (!isBaseOrSetup) return false;
+      if (currentPrice === 0) return true;
+      const deviation = Math.abs(level.price - currentPrice) / currentPrice;
+      return deviation < 0.20; // 20% max deviation for full-width lines
+    });
 
     if (visibleLevels.length === 0) {
       return;

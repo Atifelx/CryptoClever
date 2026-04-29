@@ -145,6 +145,10 @@ function detectFMCBRBreak(candles: Candle[]) {
         const basePrice = recentLow.price;
         const setupPrice = majorHigh.price;
         const range = setupPrice - basePrice;
+        
+        // RANGE LIMIT: If the setup range is > 10% of the price, it's likely a stale/garbage pivot.
+        if (range > basePrice * 0.1) continue;
+
         const tp3 = basePrice + (range * FIBO.CYCLE_423);
 
         // STICKY RULE: Only return if price is still above base AND hasn't finished the move (TP3)
@@ -170,6 +174,10 @@ function detectFMCBRBreak(candles: Candle[]) {
         const basePrice = recentHigh.price;
         const setupPrice = majorLow.price;
         const range = basePrice - setupPrice;
+        
+        // RANGE LIMIT: If the setup range is > 10% of the price, it's likely a stale/garbage pivot.
+        if (range > basePrice * 0.1) continue;
+
         const tp3 = basePrice - (range * FIBO.CYCLE_423);
 
         if (currentPrice < basePrice && currentPrice > tp3) {

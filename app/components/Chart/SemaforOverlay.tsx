@@ -40,7 +40,13 @@ export default function SemaforOverlay({
 
     const updateLayout = () => {
       const timeScale = chart.timeScale();
-      const lvl3Points = points.filter(p => p.strength === 3);
+      const currentPrice = points[points.length - 1]?.price || 0;
+      const lvl3Points = points.filter(p => {
+        if (p.strength !== 3) return false;
+        if (currentPrice === 0) return true;
+        const dev = Math.abs(p.price - currentPrice) / currentPrice;
+        return dev < 0.05; // 5% guard
+      });
       
       const newMarkers: StructuralMarker[] = [];
       

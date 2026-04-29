@@ -28,15 +28,16 @@ export function useBackendCandlesLoader(selectedSymbol: string) {
           return;
         }
 
-        const data = await res.json();
-        const candles: Candle[] = (data.candles || []).map((c: any) => ({
-          time: typeof c.time === 'number' ? (c.time >= 1e12 ? Math.floor(c.time / 1000) : c.time) : Math.floor((c.time || 0) / 1000),
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-          volume: c.volume ?? 0,
-        }));
+        const candles: Candle[] = (data.candles || [])
+          .map((c: any) => ({
+            time: typeof c.time === 'number' ? (c.time >= 1e12 ? Math.floor(c.time / 1000) : c.time) : Math.floor((c.time || 0) / 1000),
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+            volume: Number(c.volume ?? 0),
+          }))
+          .filter(c => c.open > 0 && c.high > 0 && c.low > 0 && c.close > 0);
 
         if (candles.length > 0) {
           setCandlesForSymbol(selectedSymbol, candles);

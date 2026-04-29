@@ -58,7 +58,14 @@ export default function UnifiedMarkerManager({
 
     // ──── SEMAFOR MARKERS ────
     if (showSemafor && semaforPoints && semaforPoints.length > 0) {
-      const sorted = [...semaforPoints].sort((a, b) => a.time - b.time);
+      const currentPrice = semaforPoints[semaforPoints.length - 1]?.price || 0;
+      const sorted = [...semaforPoints]
+        .filter(p => {
+          if (currentPrice === 0) return true;
+          const dev = Math.abs(p.price - currentPrice) / currentPrice;
+          return dev < 0.05; // Only show dots within 5% of current price to avoid stretch
+        })
+        .sort((a, b) => a.time - b.time);
 
       for (const point of sorted) {
         const isHigh = point.type === 'high';
@@ -116,10 +123,15 @@ export default function UnifiedMarkerManager({
     // This prevents visibility issues with markers overlapping candles
 
     // ──── SCALP SIGNAL MARKERS ────
-    // White circle now also renders as overlay (see ScalpSignalOverlay.tsx)
-    // But keep markers as fallback for visibility on chart
     if (showScalp && scalpSignals && scalpSignals.length > 0) {
+      const currentPrice = semaforPoints[semaforPoints.length - 1]?.price || 0;
       for (const item of scalpSignals) {
+        // Safety Guard: 5% vertical limit
+        if (currentPrice > 0) {
+          const dev = Math.abs(item.price - currentPrice) / currentPrice;
+          if (dev > 0.05) continue;
+        }
+
         if (item.signal === 'LONG' || item.signal === 'SHORT') {
           const isBuy = item.signal === 'LONG';
           const rsiText = item.rsi != null ? `RSI: ${item.rsi.toFixed(0)}` : '';
