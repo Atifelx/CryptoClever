@@ -41,7 +41,7 @@ export default function AISignalArrowOverlay({
   longTrade,
   visible,
 }: AISignalArrowOverlayProps) {
-  const [layout, setLayout] = useState<ArrowLayout | null>(null);
+  const [layout, setLayout] = useState<(ArrowLayout & { scalpX: number; longX: number }) | null>(null);
 
   useEffect(() => {
     if (!chart || !candleSeries || !containerRef.current || !visible || (!scalpTrade && !longTrade)) {
@@ -51,7 +51,20 @@ export default function AISignalArrowOverlay({
 
     const updateLayout = () => {
       try {
-        const newLayout: Partial<ArrowLayout> = {};
+        const timeScale = chart.timeScale();
+        const data = candleSeries.data();
+        if (!data || data.length === 0) return;
+        
+        const lastCandle = data[data.length - 1];
+        const lastX = timeScale.timeToCoordinate(lastCandle.time);
+        
+        if (lastX === null || Number.isNaN(lastX)) return;
+
+        const newLayout: any = {
+          // Position arrows in the future space (to the right of last candle)
+          scalpX: lastX + 180, 
+          longX: lastX + 120,
+        };
 
         if (scalpTrade) {
           const ey = candleSeries.priceToCoordinate(scalpTrade.entry);
@@ -75,12 +88,8 @@ export default function AISignalArrowOverlay({
           }
         }
 
-        // Only set layout if we have at least one complete set
-        if (
-          (newLayout.scalpEntryY !== undefined) ||
-          (newLayout.longEntryY !== undefined)
-        ) {
-          setLayout(newLayout as ArrowLayout);
+        if (newLayout.scalpEntryY !== undefined || newLayout.longEntryY !== undefined) {
+          setLayout(newLayout);
         } else {
           setLayout(null);
         }
@@ -90,7 +99,7 @@ export default function AISignalArrowOverlay({
     };
 
     updateLayout();
-    const interval = window.setInterval(updateLayout, 300);
+    const interval = window.setInterval(updateLayout, 100);
     const onResize = () => updateLayout();
     window.addEventListener('resize', onResize);
 
@@ -104,20 +113,18 @@ export default function AISignalArrowOverlay({
     return null;
   }
 
-  // Scalp arrows on the left side, Long arrows further left
-  const scalpX = 60; // px from right edge
-  const longX = 30;  // px from right edge
+  const { scalpX, longX } = layout;
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10">
+    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
       {/* ─── Scalp Trade Arrow ─── */}
       {scalpTrade && layout.scalpEntryY !== undefined && layout.scalpTargetY !== undefined && layout.scalpStopY !== undefined && (
         <>
-          {/* Scalp: vertical range bar (entry to target) */}
+          {/* Scalp: vertical range bar */}
           <div
             className="absolute rounded-sm"
             style={{
-              right: `${scalpX}px`,
+              left: `${scalpX}px`,
               top: `${Math.min(layout.scalpEntryY, layout.scalpTargetY)}px`,
               width: '4px',
               height: `${Math.abs(layout.scalpTargetY - layout.scalpEntryY)}px`,
@@ -134,7 +141,7 @@ export default function AISignalArrowOverlay({
           <div
             className="absolute"
             style={{
-              right: `${scalpX - 6}px`,
+              left: `${scalpX - 6}px`,
               top: `${layout.scalpStopY}px`,
               width: '16px',
               height: '2px',
@@ -147,7 +154,7 @@ export default function AISignalArrowOverlay({
           <div
             className="absolute"
             style={{
-              right: `${scalpX - 4}px`,
+              left: `${scalpX - 4}px`,
               top: `${layout.scalpTargetY}px`,
               transform: scalpTrade.direction === 'BUY' ? 'translateY(-100%)' : 'translateY(0)',
             }}
@@ -169,7 +176,7 @@ export default function AISignalArrowOverlay({
           <div
             className="absolute rounded-full"
             style={{
-              right: `${scalpX - 2}px`,
+              left: `${scalpX - 2}px`,
               top: `${layout.scalpEntryY}px`,
               width: '8px',
               height: '8px',
@@ -183,9 +190,9 @@ export default function AISignalArrowOverlay({
           <div
             className="absolute text-[9px] font-bold tracking-wider uppercase"
             style={{
-              right: `${scalpX + 10}px`,
+              left: `${scalpX + 10}px`,
               top: `${Math.min(layout.scalpEntryY, layout.scalpTargetY) + Math.abs(layout.scalpTargetY - layout.scalpEntryY) / 2}px`,
-              transform: 'translateY(-50%) rotate(-90deg)',
+              transform: 'translateY(-50%) rotate(90deg)',
               transformOrigin: 'center center',
               color: scalpTrade.direction === 'BUY' ? 'rgba(38, 166, 154, 0.7)' : 'rgba(239, 83, 80, 0.7)',
               whiteSpace: 'nowrap',
@@ -199,11 +206,10 @@ export default function AISignalArrowOverlay({
       {/* ─── Long Trade Arrow ─── */}
       {longTrade && layout.longEntryY !== undefined && layout.longTargetY !== undefined && layout.longStopY !== undefined && (
         <>
-          {/* Long: vertical range bar (entry to target) */}
           <div
             className="absolute rounded-sm"
             style={{
-              right: `${longX}px`,
+              left: `${longX}px`,
               top: `${Math.min(layout.longEntryY, layout.longTargetY)}px`,
               width: '6px',
               height: `${Math.abs(layout.longTargetY - layout.longEntryY)}px`,
@@ -216,25 +222,22 @@ export default function AISignalArrowOverlay({
             }}
           />
 
-          {/* Long: stop loss dash */}
           <div
             className="absolute"
             style={{
-              right: `${longX - 8}px`,
+              left: `${longX - 8}px`,
               top: `${layout.longStopY}px`,
               width: '22px',
               height: '2px',
               backgroundColor: 'rgba(239, 83, 80, 0.5)',
               transform: 'translateY(-1px)',
-              borderStyle: 'dashed',
             }}
           />
 
-          {/* Long: arrow head at target */}
           <div
             className="absolute"
             style={{
-              right: `${longX - 5}px`,
+              left: `${longX - 5}px`,
               top: `${layout.longTargetY}px`,
               transform: longTrade.direction === 'BUY' ? 'translateY(-100%)' : 'translateY(0)',
             }}
@@ -252,26 +255,23 @@ export default function AISignalArrowOverlay({
             />
           </div>
 
-          {/* Long: entry dot */}
           <div
             className="absolute rounded-full"
             style={{
-              right: `${longX - 3}px`,
+              left: `${longX - 3}px`,
               top: `${layout.longEntryY}px`,
               width: '10px',
               height: '10px',
               backgroundColor: 'rgba(255, 255, 255, 0.6)',
-              border: '2px solid rgba(255, 255, 255, 0.3)',
               transform: 'translate(0, -50%)',
               boxShadow: '0 0 8px rgba(255, 255, 255, 0.3)',
             }}
           />
 
-          {/* Long: label */}
           <div
             className="absolute text-[9px] font-bold tracking-wider uppercase"
             style={{
-              right: `${longX + 12}px`,
+              left: `${longX - 25}px`,
               top: `${Math.min(layout.longEntryY, layout.longTargetY) + Math.abs(layout.longTargetY - layout.longEntryY) / 2}px`,
               transform: 'translateY(-50%) rotate(-90deg)',
               transformOrigin: 'center center',
@@ -284,7 +284,7 @@ export default function AISignalArrowOverlay({
         </>
       )}
 
-      {/* ─── Target Price Labels (right edge) ─── */}
+      {/* Target Price Labels (fixed on right edge) */}
       {scalpTrade && layout.scalpTargetY !== undefined && (
         <div
           className="absolute rounded-sm px-1.5 py-0.5 text-[9px] font-mono font-semibold"

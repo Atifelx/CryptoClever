@@ -1,133 +1,117 @@
 'use client';
 
-import { useEffect } from 'react';
-import { ISeriesApi } from 'lightweight-charts';
+import { RefObject, useEffect, useState } from 'react';
+import { ISeriesApi, IChartApi } from 'lightweight-charts';
 import { SemaforPoint } from '../../lib/indicators/types';
 
 interface SemaforOverlayProps {
+  chart: IChartApi | null;
   candleSeries: ISeriesApi<'Candlestick'> | null;
+  containerRef: RefObject<HTMLDivElement>;
   points: SemaforPoint[];
   visible: boolean;
 }
 
+interface StructuralMarker {
+  x: number;
+  y: number;
+  type: 'high' | 'low';
+}
+
 /**
- * Semafor Overlay — renders on the chart:
- * 
- * HISTORICAL PIVOTS (ZigZag):
- *   • Green circles at swing LOWS (buy zones)  
- *   • Orange circles at swing HIGHS (sell zones)
- *   • Size 1-2 based on strength
- * 
- * LIVE SIGNALS (candle pattern detection):
- *   • BIG green circle + green ▲ arrow for bullish patterns
- *   • BIG red circle + red ▼ arrow for bearish patterns
- *   • Circle at wick end, Arrow at center (inBar) with 50% alpha color
- *   • Pattern name shown as text label
+ * Semafor Structural Overlay
+ * Renders the "Major Structure" points (Level 3) with an arrow inside a circle,
+ * matching the exact MT4 aesthetic.
  */
-export default function SemaforOverlay({ candleSeries, points, visible }: SemaforOverlayProps) {
+export default function SemaforOverlay({
+  chart,
+  candleSeries,
+  containerRef,
+  points,
+  visible,
+}: SemaforOverlayProps) {
+  const [markers, setMarkers] = useState<StructuralMarker[]>([]);
 
   useEffect(() => {
-    if (!candleSeries) return;
-
-    // Clear markers when not visible or no points
-    if (!visible || !points || points.length === 0) {
-      try { candleSeries.setMarkers([]); } catch {}
+    if (!chart || !candleSeries || !containerRef.current || !visible || !points.length) {
+      setMarkers([]);
       return;
     }
 
-    // Sort by time (required by lightweight-charts)
-    const sorted = [...points].sort((a, b) => a.time - b.time);
-
-    const markers: Array<{
-      time: any;
-      position: 'aboveBar' | 'belowBar' | 'inBar';
-      color: string;
-      shape: 'circle' | 'arrowUp' | 'arrowDown';
-      size: number;
-      text?: string;
-    }> = [];
-
-    for (const point of sorted) {
-      const isHigh = point.type === 'high';
-      const isLive = !!point.isLive;
-      const direction = point.direction;
-      const pattern = point.pattern;
-
-      if (isLive && direction) {
-        // ═══════════════════════════════════════════════
-        //  LIVE SIGNAL — Big Circle + Directional Arrow
-        // ═══════════════════════════════════════════════
-        const isUp = direction === 'UP';
-
-        // 1) BIG CIRCLE at wick end — bright, prominent
-        const circleColor = isUp ? '#00ff66' : '#ff2222';
-        const circleSize = point.strength === 3 ? 3.0 : point.strength === 2 ? 2.5 : 2.0;
-
-        markers.push({
-          time: point.time as any,
-          position: isUp ? 'belowBar' : 'aboveBar',
-          color: circleColor,
-          shape: 'circle',
-          size: circleSize,
-          text: pattern || (isUp ? 'BUY' : 'SELL'),
-        });
-
-        // 2) DIRECTIONAL ARROW at candle center — 50% alpha (lighter color)
-        const arrowColor = isUp ? '#80ffbb' : '#ff9999'; // lighter = simulates 50% alpha
-
-        markers.push({
-          time: point.time as any,
-          position: 'inBar', // renders at close price level (center of candle)
-          color: arrowColor,
-          shape: isUp ? 'arrowUp' : 'arrowDown',
-          size: circleSize - 0.5,
-        });
-
-      } else {
-        // ═══════════════════════════════════════════════
-        //  HISTORICAL PIVOT — standard Semafor circles
-        // ═══════════════════════════════════════════════
-        const color = isHigh
-          ? (point.strength === 3 ? '#ff4400' : point.strength === 2 ? '#ff6600' : '#ff8800')
-          : (point.strength === 3 ? '#00cc00' : point.strength === 2 ? '#00bb44' : '#00aa66');
-
-        const size = point.strength === 3 ? 2.0
-                   : point.strength === 2 ? 1.5
-                   : 1.0;
-
-        markers.push({
-          time: point.time as any,
-          position: isHigh ? 'aboveBar' : 'belowBar',
-          color,
-          shape: 'circle',
-          size,
-        });
+    const updateLayout = () => {
+      const timeScale = chart.timeScale();
+      const lvl3Points = points.filter(p => p.strength === 3);
+      
+      const newMarkers: StructuralMarker[] = [];
+      
+      for (const p of lvl3Points) {
+        const x = timeScale.timeToCoordinate(p.time as any);
+        const y = candleSeries.priceToCoordinate(p.price);
+        
+        if (x !== null && y !== null && !Number.isNaN(x) && !Number.isNaN(y)) {
+          newMarkers.push({ x, y, type: p.type as 'high' | 'low' });
+        }
       }
-    }
+      
+      setMarkers(newMarkers);
+    };
 
-    // Sort: lightweight-charts requires ascending time order
-    // For same time: position order (aboveBar → inBar → belowBar) then shape (circle → arrow)
-    const posOrder = { 'aboveBar': 0, 'inBar': 1, 'belowBar': 2 };
-    const shapeOrder = { 'circle': 0, 'arrowDown': 1, 'arrowUp': 1 };
+    updateLayout();
     
-    markers.sort((a, b) => {
-      if (a.time !== b.time) return a.time - b.time;
-      const pa = posOrder[a.position] ?? 1;
-      const pb = posOrder[b.position] ?? 1;
-      if (pa !== pb) return pa - pb;
-      const sa = shapeOrder[a.shape] ?? 0;
-      const sb = shapeOrder[b.shape] ?? 0;
-      return sa - sb;
-    });
+    // Update on a timer to catch chart scrolls/zooms
+    const interval = window.setInterval(updateLayout, 100);
+    const onResize = () => updateLayout();
+    window.addEventListener('resize', onResize);
 
-    try {
-      candleSeries.setMarkers(markers);
-    } catch (error) {
-      console.error('Semafor marker error:', error);
-    }
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [chart, candleSeries, containerRef, points, visible]);
 
-    // NO cleanup function — prevents markers from disappearing on WebSocket ticks
-  }, [candleSeries, points, visible]);
+  if (!visible || !markers.length) return null;
 
-  return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10">
+      <svg width="100%" height="100%" className="absolute inset-0 overflow-visible">
+        {markers.map((m, i) => {
+          const isHigh = m.type === 'high';
+          const color = isHigh ? '#ff2222' : '#0066ff';
+          const shadowColor = isHigh ? 'rgba(255, 34, 34, 0.5)' : 'rgba(0, 102, 255, 0.5)';
+          
+          // Offset Y slightly to be above/below the wick
+          const offsetY = isHigh ? m.y - 25 : m.y + 25;
+          
+          return (
+            <g key={i} style={{ filter: `drop-shadow(0 0 8px ${shadowColor})` }}>
+              {/* The Outer Circle */}
+              <circle
+                cx={m.x}
+                cy={offsetY}
+                r="14"
+                fill={color}
+                stroke="#ffffff"
+                strokeWidth="2"
+              />
+              
+              {/* The Arrow Inside */}
+              {isHigh ? (
+                // Arrow Down
+                <path
+                  d={`M ${m.x - 6} ${offsetY - 4} L ${m.x + 6} ${offsetY - 4} L ${m.x} ${offsetY + 7} Z`}
+                  fill="#ffffff"
+                />
+              ) : (
+                // Arrow Up
+                <path
+                  d={`M ${m.x - 6} ${offsetY + 4} L ${m.x + 6} ${offsetY + 4} L ${m.x} ${offsetY - 7} Z`}
+                  fill="#ffffff"
+                />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
 }

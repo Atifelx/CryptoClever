@@ -48,9 +48,9 @@ export default function FMCBROverlay({
 
     const { levels, direction, breakType, cb1 } = signal;
 
-    // User requested "avoid all horizontal line in FMCBR"
-    // We only keep Support/Resistance levels if they are present, which are separate from Fibonacci levels
-    const visibleLevels = levels.filter(level => level.type === 'support' || level.type === 'resistance');
+    // ONLY render Base and Setup as subtle context lines
+    // Targets (TP) are handled by the SVG Arrow Overlay for a cleaner "localized" look
+    const visibleLevels = levels.filter(level => level.type === 'base' || level.type === 'setup');
 
     if (visibleLevels.length === 0) {
       return;

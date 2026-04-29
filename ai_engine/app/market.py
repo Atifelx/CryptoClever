@@ -474,3 +474,58 @@ def build_fallback_prediction(
         "scalpTrade": scalp_trade,
         "longTrade": long_trade,
     }
+def analyze_price_action(candles: list[dict[str, Any]]) -> dict[str, Any]:
+    """Detect high-probability candlestick patterns for the AI Agent."""
+    if len(candles) < 10:
+        return {"patterns": [], "bias": "neutral"}
+    
+    last_10 = candles[-10:]
+    patterns = []
+    bullish_weight = 0
+    bearish_weight = 0
+
+    for i in range(1, len(last_10)):
+        curr = last_10[i]
+        prev = last_10[i-1]
+        
+        c_open, c_close = float(curr["open"]), float(curr["close"])
+        c_high, c_low = float(curr["high"]), float(curr["low"])
+        p_open, p_close = float(prev["open"]), float(prev["close"])
+        
+        body_size = abs(c_close - c_open)
+        wick_size = (c_high - max(c_open, c_close)) + (min(c_open, c_close) - c_low)
+        range_size = c_high - c_low if c_high > c_low else 0.0001
+        
+        # 1. Bullish Engulfing
+        if c_close > c_open and p_close < p_open and c_close > p_open and c_open < p_close:
+            patterns.append(f"Bullish Engulfing at candle {i}")
+            bullish_weight += 2
+            
+        # 2. Bearish Engulfing
+        if c_close < c_open and p_close > p_open and c_close < p_open and c_open > p_close:
+            patterns.append(f"Bearish Engulfing at candle {i}")
+            bearish_weight += 2
+            
+        # 3. Pin Bar / Hammer (Reversal)
+        if body_size < (range_size * 0.3):
+            # Bullish Hammer
+            if (min(c_open, c_close) - c_low) > (body_size * 2) and (c_high - max(c_open, c_close)) < (body_size * 0.5):
+                patterns.append(f"Bullish Hammer / Pin Bar at candle {i}")
+                bullish_weight += 1.5
+            # Bearish Shooting Star
+            if (c_high - max(c_open, c_close)) > (body_size * 2) and (min(c_open, c_close) - c_low) < (body_size * 0.5):
+                patterns.append(f"Bearish Shooting Star / Pin Bar at candle {i}")
+                bearish_weight += 1.5
+                
+        # 4. Doji (Indecision)
+        if body_size < (range_size * 0.1):
+            patterns.append(f"Doji (Indecision) at candle {i}")
+
+    bias = "bullish" if bullish_weight > bearish_weight + 1 else "bearish" if bearish_weight > bullish_weight + 1 else "neutral"
+    
+    return {
+        "patterns": patterns[-4:], # Last 4 patterns
+        "bias": bias,
+        "strength": max(bullish_weight, bearish_weight),
+        "recent_sentiment": "Buying pressure identified" if bullish_weight > 0 else "Selling pressure identified" if bearish_weight > 0 else "Low momentum"
+    }

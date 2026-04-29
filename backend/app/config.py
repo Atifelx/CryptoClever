@@ -16,13 +16,13 @@ SYMBOLS = [
 FOREX_SYMBOLS = ["C:XAUUSD"]
 CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 
-# Only 5m interval for minimal server load
-INTERVALS = ["5m"]
+# Support 1m and 5m intervals. 1m is base for live streaming, 5m for analysis.
+INTERVALS = ["1m", "5m"]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # Set to "1" or "true" to use in-memory store instead of Redis (no Redis needed for local testing)
 USE_MEMORY_STORE = os.getenv("USE_MEMORY_STORE", "true").lower() in ("1", "true", "yes")
-BUFFER_SIZE = 1000  # Max candles per symbol/interval in Redis
+BUFFER_SIZE = 1000  # Max candles per symbol/interval in Redis (as per user request)
 
 # Binance WebSocket base URL
 BINANCE_WS_BASE = "wss://stream.binance.com:9443"
@@ -50,5 +50,5 @@ DATABASE_URL = os.getenv(
 )
 
 AI_ENGINE_URL = os.getenv("AI_ENGINE_URL", "")
-AI_ENGINE_TIMEOUT_SECONDS = float(os.getenv("AI_ENGINE_TIMEOUT_SECONDS", "25"))
+AI_ENGINE_TIMEOUT_SECONDS = float(os.getenv("AI_ENGINE_TIMEOUT_SECONDS", "60"))
 CORE_ENGINE_USE_AI = os.getenv("CORE_ENGINE_USE_AI", "true").lower() in ("1", "true", "yes")

@@ -106,21 +106,7 @@ async def analyze(symbol: str, interval: str, limit: int = AI_ENGINE_CANDLE_LIMI
                     "interval": normalized_interval,
                     "instrument": _instrument_label(normalized_symbol),
                     "marketSnapshot": market_snapshot,
-                    "supportResistance": support_resistance,
-                    "latestCandles": [
-                        {
-                            "time": c["time"],
-                            "open": c["open"],
-                            "high": c["high"],
-                            "low": c["low"],
-                            "close": c["close"],
-                            "volume": c.get("volume", 0),
-                        }
-                        for c in candles[-80:]
-                    ],
-                    "news": market_intel["items"],
-                    "newsSummary": market_intel["summary"],
-                    "defaultRecommendation": fallback_prediction,
+                    "allCandles": candles,
                 },
                 fallback_prediction,
             )

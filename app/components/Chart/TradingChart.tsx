@@ -22,6 +22,7 @@ import { formatIST } from '../../lib/utils/time';
 import CoreEngineOverlay from './CoreEngineOverlay';
 import AIPredictionOverlay from './AIPredictionOverlay';
 import FMCBRArrowOverlay from './FMCBRArrowOverlay';
+import SemaforOverlay from './SemaforOverlay';
 import AISignalArrowOverlay from './AISignalArrowOverlay';
 
 interface TradingChartProps {
@@ -65,28 +66,12 @@ export default function TradingChart({
   const { candles, isConnected, isLoading } = useCandles(symbol);
   const lastCandle = candles.length > 0 ? candles[candles.length - 1] : null;
   const lastCandleAgeSeconds = lastCandle ? Math.max(0, Math.floor(Date.now() / 1000) - lastCandle.time) : null;
-  const connectionLabel = isForexSymbol
-    ? '5m Updates'
-    : isConnected
-      ? 'Live'
-      : 'Disconnected';
-  const priceStatusLabel = isForexSymbol
-    ? '5M'
-    : isConnected
-      ? 'LIVE'
-      : 'Disconnected';
-  const priceStatusClass = isForexSymbol
-    ? 'text-amber-400'
-    : isConnected
-      ? 'text-green-500'
-      : 'text-red-400';
-  const priceDotClass = isForexSymbol
-    ? 'bg-amber-400 w-[9.6px] h-[9.6px]'
-    : isConnected
-      ? 'bg-green-500 w-[9.6px] h-[9.6px]'
-      : 'bg-red-500 w-2 h-2';
+  const connectionLabel = isConnected ? 'Live' : 'Disconnected';
+  const priceStatusLabel = isConnected ? 'LIVE' : 'Disconnected';
+  const priceStatusClass = isConnected ? 'text-green-500' : 'text-red-400';
+  const priceDotClass = isConnected ? 'bg-green-500 w-[9.6px] h-[9.6px]' : 'bg-red-500 w-2 h-2';
   const lastUpdateLabel = lastCandle
-    ? `Last candle ${formatIST(lastCandle.time * 1000)}`
+    ? `Last candle ${formatIST(lastCandle.time)}`
     : 'Waiting for candle data';
   const staleLabel = isForexSymbol && lastCandleAgeSeconds !== null && lastCandleAgeSeconds > 3600
     ? `Source is ${Math.floor(lastCandleAgeSeconds / 3600)}h behind`
@@ -520,9 +505,10 @@ export default function TradingChart({
     console.log(`[Chart Data Effect] Decision: prevLen=${prevLen}, isInitialLoad=${isInitialLoad}, hasNewCandle=${hasNewCandle}, isSymbolChange=${isSymbolChange}, isFirstLoad=${isFirstLoad}`);
     console.log(`[Chart Data Effect] Refs: prevSymbol=${prevSymbolRef.current}, currentSymbol=${symbol}, prevInterval=${prevIntervalRef.current}`);
 
-    // CRITICAL: Always use setData on first data load after component mount OR symbol/interval change OR new candle
-    if (isFirstLoad || isInitialLoad || isSymbolChange || hasNewCandle) {
-      // Mark that first load is complete
+    // DECISION LOGIC:
+    // 1. If it's a symbol/interval change or first load ever -> setData()
+    // 2. If it's the same symbol and we have existing data -> update() with the last candle
+    if (isFirstLoad || isSymbolChange || prevLen === 0) {
       isFirstDataLoadRef.current = false;
       const candlestickData = candles.map((c: Candle) => ({
         time: c.time as Time,
@@ -538,45 +524,6 @@ export default function TradingChart({
       }));
 
       try {
-        if (process.env.NODE_ENV === 'development') {
-          const lastClose = candles[candles.length - 1]?.close;
-          const first3Times = candlestickData.slice(0, 3).map(c => c.time);
-          const first3Closes = candlestickData.slice(0, 3).map(c => c.close);
-          const last3Times = candlestickData.slice(-3).map(c => c.time);
-          const last3Closes = candlestickData.slice(-3).map(c => c.close);
-          console.log(`[TradingChart] setData for ${symbol}: count=${candlestickData.length}`);
-          console.log(`  FIRST times: ${first3Times.join(',')} closes: ${first3Closes.join(',')}`);
-          console.log(`  LAST times: ${last3Times.join(',')} closes: ${last3Closes.join(',')}`);
-          
-          // VALIDATION: Check if we're rendering the correct symbol's data
-          const mid3Index = Math.floor(candlestickData.length / 2);
-          const mid3 = candlestickData.slice(mid3Index, mid3Index + 3);
-          console.log(`  MIDDLE [${mid3Index}]: times=${mid3.map(c => c.time).join(',')} closes=${mid3.map(c => c.close).join(',')}`);
-          console.log(`  ⚠️ VERIFY: Chart instance ID: ${chartRef.current ? 'exists' : 'null'}, Series ID: ${candleSeriesRef.current ? 'exists' : 'null'}`);
-          
-          // CRITICAL VALIDATION: Check if price range matches the expected symbol
-          const avgPrice = (first3Closes[0] + mid3[0].close + last3Closes[0]) / 3;
-          console.log(`  🔍 PRICE CHECK: symbol=${symbol}, avgPrice=${avgPrice.toFixed(2)}`);
-          
-          // Expected price ranges for validation
-          const expectedRanges: Record<string, [number, number]> = {
-            'BTCUSDT': [50000, 100000],
-            'ETHUSDT': [1000, 10000],
-            'SOLUSDT': [50, 500],
-            'BNBUSDT': [200, 1000],
-            'XRPUSDT': [0.5, 10]
-          };
-          
-          const range = expectedRanges[symbol];
-          if (range && (avgPrice < range[0] || avgPrice > range[1])) {
-            console.error(`❌ DATA MISMATCH! ${symbol} should be ${range[0]}-${range[1]} but got ${avgPrice.toFixed(2)}`);
-          } else {
-            console.log(`  ✅ PRICE VALIDATION PASSED for ${symbol}`);
-          }
-          
-          // Log a sample of the actual data object being passed
-          console.log('  Sample candlestick data:', JSON.stringify(candlestickData.slice(0, 2)));
-        }
         candleSeriesRef.current.setData(candlestickData);
         volumeSeriesRef.current.setData(volumeData);
         chartDataSymbolRef.current = symbol;
@@ -586,31 +533,22 @@ export default function TradingChart({
         prevSymbolRef.current = symbol;
         prevIntervalRef.current = interval;
 
-        // Update time scale and size SYNCHRONOUSLY before paint (no rAF/setTimeout) so chart renders correctly when switching symbol.
+        // Initial visible range: only on symbol change or first load
         const ch = chartRef.current;
-        const cont = chartContainerRef.current;
-        if (ch && cont && candlestickData.length > 0) {
-          if (!userInteractedRef.current || isSymbolChange) {
-            const visibleCandles = 80;
-            const lastTime = candlestickData[candlestickData.length - 1].time as number;
-            const firstVisibleIndex = Math.max(0, candlestickData.length - visibleCandles);
-            const firstTime = candlestickData[firstVisibleIndex].time as number;
-            ch.timeScale().setVisibleRange({ from: firstTime as Time, to: lastTime as Time });
-          }
-          // When user has already interacted, do not call fitContent() — it zooms out and overrides their view.
-          ch.applyOptions({
-            width: cont.clientWidth,
-            height: cont.clientHeight || 600,
-          });
+        if (ch && candlestickData.length > 0) {
+          const visibleCandles = 80;
+          const lastTime = candlestickData[candlestickData.length - 1].time as number;
+          const firstVisibleIndex = Math.max(0, candlestickData.length - visibleCandles);
+          const firstTime = candlestickData[firstVisibleIndex].time as number;
+          ch.timeScale().setVisibleRange({ from: firstTime as Time, to: lastTime as Time });
         }
-
-        console.log(`✅ [Chart] setData for ${symbol} (${candlestickData.length} candles)`);
+        console.log(`✅ [Chart] Initialized data for ${symbol} (${candlestickData.length} candles)`);
       } catch (error) {
-        console.error('[Chart] Error setting chart data:', error);
+        console.error('[Chart] Error setting initial chart data:', error);
       }
     } else {
-      // Same length, only last candle updated (e.g. from poll): use update().
-      console.log(`[Chart] Using UPDATE (not setData) for ${symbol} - same candle count: ${candles.length}`);
+      // INCREMENTAL UPDATE: Use update() to append or modify the last candle.
+      // This is MUCH smoother than setData() and prevents the "jumping" UI glitch.
       const lastCandle = candles[candles.length - 1];
       if (lastCandle) {
         try {
@@ -628,7 +566,9 @@ export default function TradingChart({
           });
           setCurrentPrice(lastCandle.close);
           prevCandlesLenRef.current = candles.length;
-        } catch {}
+        } catch (error) {
+          console.error('[Chart] Update error:', error);
+        }
       }
     }
   }, [candles, isLoading, symbol, interval]);
@@ -798,6 +738,14 @@ export default function TradingChart({
             containerRef={chartContainerRef}
             signal={fmcbrSignal}
             visible={isEnabled('fmcbr')}
+          />
+
+          <SemaforOverlay
+            chart={chartRef.current}
+            candleSeries={candleSeriesRef.current}
+            containerRef={chartContainerRef}
+            points={semaforPoints}
+            visible={isEnabled('semafor')}
           />
 
           {/* AI Signal Range Arrows — Scalp & Long trade visual on chart */}

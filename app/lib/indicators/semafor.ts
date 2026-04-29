@@ -201,8 +201,13 @@ function runZigZag(candles: Candle[], devPercent: number): ZigZagPivot[] {
     }
   }
 
-  // REMOVED for zero repainting: don't add the last unconfirmed extreme.
-  // The logic now only returns pivots that have been officially confirmed by a reversal.
+  // ADD THE LATEST EXTREME (Tentative/Repainting) to match MT4 feel
+  // This is what the user expects for 1m trades
+  if (direction === 1) {
+    pivots.push({ index: swHi, time: candles[swHi].time, price: swHiP, type: 'high' });
+  } else if (direction === -1) {
+    pivots.push({ index: swLo, time: candles[swLo].time, price: swLoP, type: 'low' });
+  }
 
   return pivots;
 }

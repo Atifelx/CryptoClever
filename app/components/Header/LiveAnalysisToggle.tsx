@@ -307,132 +307,163 @@ export default function LiveAnalysisToggle() {
 
       {/* Expanded details panel: Scalp + Long + Why */}
       {analysis?.prediction && showDetails && (
-        <div className="bg-[#111] border border-gray-800 rounded-lg p-3 sm:p-4 mx-0 animate-in fade-in duration-200">
-          {/* Summary */}
-          <div className="mb-3 text-sm text-gray-300">
-            {analysis.prediction.summary}
+        <div className="bg-[#0a0a0a] border border-gray-800/60 rounded-xl p-4 sm:p-5 mt-2 animate-in slide-in-from-top-2 duration-300 shadow-2xl">
+          {/* Section: Overview */}
+          <div className="mb-5 pb-4 border-b border-gray-800/50">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-[0.15em] mb-2">Market Intelligence</h3>
+            <p className="text-sm text-gray-200 leading-relaxed font-medium">
+              {analysis.prediction.summary}
+            </p>
           </div>
 
-          {/* Trade Plans Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-            {/* Scalp Trade */}
+          {/* Section: Trade Execution Plans */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+            {/* Scalp Strategy */}
             {analysis.prediction.scalpTrade && (
-              <div className={`rounded-lg border p-3 ${
+              <div className={`relative overflow-hidden rounded-xl border p-4 transition-all hover:shadow-lg ${
                 analysis.prediction.scalpTrade.direction === 'BUY'
-                  ? 'bg-[#0d2818]/60 border-green-500/30'
-                  : 'bg-[#28180d]/60 border-red-500/30'
+                  ? 'bg-green-500/[0.03] border-green-500/20 hover:border-green-500/40'
+                  : 'bg-red-500/[0.03] border-red-500/20 hover:border-red-500/40'
               }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-[10px] uppercase tracking-wider text-gray-500 font-medium">⚡ Scalp Trade</div>
-                  <div className={`text-xs font-bold px-2 py-0.5 rounded ${
-                    analysis.prediction.scalpTrade.direction === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className={`p-1.5 rounded-lg ${
+                      analysis.prediction.scalpTrade.direction === 'BUY' ? 'bg-green-500/20' : 'bg-red-500/20'
+                    }`}>
+                      <span className="text-base">⚡</span>
+                    </div>
+                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Scalp Strategy</span>
+                  </div>
+                  <div className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase ${
+                    analysis.prediction.scalpTrade.direction === 'BUY' 
+                      ? 'bg-green-500 text-white' 
+                      : 'bg-red-500 text-white'
                   }`}>
                     {analysis.prediction.scalpTrade.direction}
                   </div>
                 </div>
-                <div className="space-y-1 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Entry</span>
-                    <span className="text-white font-mono">{fmtPrice(analysis.prediction.scalpTrade.entry)}</span>
+
+                <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Entry</div>
+                    <div className="text-sm font-mono text-white font-bold">{fmtPrice(analysis.prediction.scalpTrade.entry)}</div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Target</span>
-                    <span className="text-green-400 font-mono">{fmtPrice(analysis.prediction.scalpTrade.target)}</span>
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Target</div>
+                    <div className="text-sm font-mono text-green-400 font-bold">{fmtPrice(analysis.prediction.scalpTrade.target)}</div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Stop</span>
-                    <span className="text-red-400 font-mono">{fmtPrice(analysis.prediction.scalpTrade.stop)}</span>
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Stop Loss</div>
+                    <div className="text-sm font-mono text-red-400 font-bold">{fmtPrice(analysis.prediction.scalpTrade.stop)}</div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Duration</span>
-                    <span className="text-[#26a69a] font-medium">{analysis.prediction.scalpTrade.expectedDuration}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Confidence</span>
-                    <span className="text-white font-medium">{analysis.prediction.scalpTrade.confidence?.toFixed(0) ?? '—'}%</span>
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Duration</div>
+                    <div className="text-sm text-[#26a69a] font-bold">{analysis.prediction.scalpTrade.expectedDuration}</div>
                   </div>
                 </div>
-                {analysis.prediction.scalpTrade.reasoning && (
-                  <div className="mt-2 text-[11px] text-gray-400 leading-tight">
-                    {analysis.prediction.scalpTrade.reasoning}
-                  </div>
-                )}
+
+                <div className="mt-4 pt-3 border-t border-gray-800/40">
+                  <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Reasoning</div>
+                  <p className="text-[11px] text-gray-400 leading-normal italic">
+                    "{analysis.prediction.scalpTrade.reasoning || 'No specific reasoning provided for this scalp setup.'}"
+                  </p>
+                </div>
               </div>
             )}
 
-            {/* Long Trade */}
+            {/* Long Strategy */}
             {analysis.prediction.longTrade && (
-              <div className={`rounded-lg border p-3 ${
+              <div className={`relative overflow-hidden rounded-xl border p-4 transition-all hover:shadow-lg ${
                 analysis.prediction.longTrade.direction === 'BUY'
-                  ? 'bg-[#0d2818]/60 border-green-500/30'
-                  : 'bg-[#28180d]/60 border-red-500/30'
+                  ? 'bg-green-500/[0.03] border-green-500/20 hover:border-green-500/40'
+                  : 'bg-red-500/[0.03] border-red-500/20 hover:border-red-500/40'
               }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-[10px] uppercase tracking-wider text-gray-500 font-medium">📈 Long Trade</div>
-                  <div className={`text-xs font-bold px-2 py-0.5 rounded ${
-                    analysis.prediction.longTrade.direction === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className={`p-1.5 rounded-lg ${
+                      analysis.prediction.longTrade.direction === 'BUY' ? 'bg-green-500/20' : 'bg-red-500/20'
+                    }`}>
+                      <span className="text-base">📈</span>
+                    </div>
+                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Long Strategy</span>
+                  </div>
+                  <div className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase ${
+                    analysis.prediction.longTrade.direction === 'BUY' 
+                      ? 'bg-green-500 text-white' 
+                      : 'bg-red-500 text-white'
                   }`}>
                     {analysis.prediction.longTrade.direction}
                   </div>
                 </div>
-                <div className="space-y-1 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Entry</span>
-                    <span className="text-white font-mono">{fmtPrice(analysis.prediction.longTrade.entry)}</span>
+
+                <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Entry</div>
+                    <div className="text-sm font-mono text-white font-bold">{fmtPrice(analysis.prediction.longTrade.entry)}</div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Target</span>
-                    <span className="text-green-400 font-mono">{fmtPrice(analysis.prediction.longTrade.target)}</span>
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Target</div>
+                    <div className="text-sm font-mono text-green-400 font-bold">{fmtPrice(analysis.prediction.longTrade.target)}</div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Stop</span>
-                    <span className="text-red-400 font-mono">{fmtPrice(analysis.prediction.longTrade.stop)}</span>
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Stop Loss</div>
+                    <div className="text-sm font-mono text-red-400 font-bold">{fmtPrice(analysis.prediction.longTrade.stop)}</div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Duration</span>
-                    <span className="text-[#26a69a] font-medium">{analysis.prediction.longTrade.expectedDuration}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Confidence</span>
-                    <span className="text-white font-medium">{analysis.prediction.longTrade.confidence?.toFixed(0) ?? '—'}%</span>
+                  <div>
+                    <div className="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Duration</div>
+                    <div className="text-sm text-[#26a69a] font-bold">{analysis.prediction.longTrade.expectedDuration}</div>
                   </div>
                 </div>
-                {analysis.prediction.longTrade.reasoning && (
-                  <div className="mt-2 text-[11px] text-gray-400 leading-tight">
-                    {analysis.prediction.longTrade.reasoning}
-                  </div>
-                )}
+
+                <div className="mt-4 pt-3 border-t border-gray-800/40">
+                  <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Reasoning</div>
+                  <p className="text-[11px] text-gray-400 leading-normal italic">
+                    "{analysis.prediction.longTrade.reasoning || 'No specific reasoning provided for this long-term setup.'}"
+                  </p>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Why Up / Why Down */}
+          {/* Section: Rationales */}
           {(analysis.prediction.whyUp || analysis.prediction.whyDown) && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
               {analysis.prediction.whyUp && (
-                <div className="bg-[#0d2818]/40 border border-green-500/20 rounded-lg p-2.5">
-                  <div className="text-[10px] uppercase tracking-wider text-green-500/70 font-medium mb-1">📈 Why Price May Go Up</div>
-                  <div className="text-xs text-gray-300 leading-relaxed">{analysis.prediction.whyUp}</div>
+                <div className="bg-green-500/[0.02] border border-green-500/10 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-green-500 text-xs">▲</span>
+                    <span className="text-[10px] font-black text-green-500/80 uppercase tracking-widest">Upside Factors</span>
+                  </div>
+                  <p className="text-xs text-gray-400 leading-relaxed font-medium">{analysis.prediction.whyUp}</p>
                 </div>
               )}
               {analysis.prediction.whyDown && (
-                <div className="bg-[#28180d]/40 border border-red-500/20 rounded-lg p-2.5">
-                  <div className="text-[10px] uppercase tracking-wider text-red-500/70 font-medium mb-1">📉 Why Price May Go Down</div>
-                  <div className="text-xs text-gray-300 leading-relaxed">{analysis.prediction.whyDown}</div>
+                <div className="bg-red-500/[0.02] border border-red-500/10 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-red-500 text-xs">▼</span>
+                    <span className="text-[10px] font-black text-red-500/80 uppercase tracking-widest">Downside Factors</span>
+                  </div>
+                  <p className="text-xs text-gray-400 leading-relaxed font-medium">{analysis.prediction.whyDown}</p>
                 </div>
               )}
             </div>
           )}
 
-          {/* Meta info */}
-          <div className="flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">
-            <span>News Bias: <span className={`font-medium ${
-              analysis.prediction.newsBias === 'bullish' ? 'text-green-400' :
-              analysis.prediction.newsBias === 'bearish' ? 'text-red-400' : 'text-gray-400'
-            }`}>{analysis.prediction.newsBias}</span></span>
+          {/* Section: Footer Metadata */}
+          <div className="flex items-center gap-x-6 gap-y-2 text-[10px] text-gray-600 font-bold uppercase tracking-widest flex-wrap mt-2">
+            <div className="flex items-center gap-1.5">
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                analysis.prediction.newsBias === 'bullish' ? 'bg-green-500' :
+                analysis.prediction.newsBias === 'bearish' ? 'bg-red-500' : 'bg-gray-500'
+              }`} />
+              <span>News Bias: <span className={
+                analysis.prediction.newsBias === 'bullish' ? 'text-green-400' :
+                analysis.prediction.newsBias === 'bearish' ? 'text-red-400' : 'text-gray-400'
+              }>{analysis.prediction.newsBias}</span></span>
+            </div>
             <span>Horizon: <span className="text-gray-400">{analysis.prediction.horizon}</span></span>
-            <span>Source: <span className="text-gray-400">{analysis.aiPowered ? 'Azure AI' : 'Fallback Engine'}</span></span>
-            <span>Updates: <span className="text-gray-400">Every 10 min</span></span>
+            <span>Source: <span className="text-gray-400">{analysis.aiPowered ? 'Azure Deep-Research' : 'Heuristic Engine'}</span></span>
+            <span>Refresh: <span className="text-gray-400">Every 10m</span></span>
           </div>
         </div>
       )}

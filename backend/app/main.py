@@ -9,8 +9,8 @@ from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
-from app.binance_ws import bootstrap_all, get_stream_status, run_binance_ws_for_symbol
-from app.twelvedata_ws import bootstrap_all_forex, run_twelvedata_poll_for_symbol
+from app.binance_ws import bootstrap_all, get_stream_status, run_binance_combined_ws
+from app.twelvedata_ws import bootstrap_all_forex, run_twelvedata_ws
 from app.config import (
     AI_ENGINE_TIMEOUT_SECONDS,
     AI_ENGINE_URL,
@@ -40,15 +40,18 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables ready")
     except Exception as e:
         logger.warning("Database init skipped or failed: %s", e)
+    
     logger.info("Bootstrapping candles (Binance & Twelve Data)...")
-    await bootstrap_all() # Binance
-    await bootstrap_all_forex() # Forex (Twelve Data)
+    await bootstrap_all() # Binance (1m & 5m)
+    await bootstrap_all_forex() # Forex (Twelve Data 1m & 5m)
     
-    binance_tasks = [asyncio.create_task(run_binance_ws_for_symbol(sym)) for sym in CRYPTO_SYMBOLS]
-    forex_tasks = [asyncio.create_task(run_twelvedata_poll_for_symbol(sym)) for sym in FOREX_SYMBOLS]
-    _ws_tasks = binance_tasks + forex_tasks
+    # Start combined WebSocket tasks
+    binance_task = asyncio.create_task(run_binance_combined_ws())
+    forex_task = asyncio.create_task(run_twelvedata_ws())
     
-    logger.info("Streaming tasks started: Binance(%d), TwelveData(%d)", len(binance_tasks), len(forex_tasks))
+    _ws_tasks = [binance_task, forex_task]
+    
+    logger.info("Streaming tasks started: Binance(Combined), TwelveData(WebSocket)")
     yield
     for t in _ws_tasks:
         t.cancel()
@@ -1035,7 +1038,8 @@ async def websocket_proposal(websocket: WebSocket, symbol: str):
         return
     
     try:
-        candles = await get_candles(symbol, "5m", limit=720)
+        # Default to 1m for base data
+        candles = await get_candles(symbol, "1m", limit=1000)
         data = [
             {
                 "time": c["time"],
@@ -1049,7 +1053,7 @@ async def websocket_proposal(websocket: WebSocket, symbol: str):
             for c in candles
         ]
         await websocket.send_json({"type": "historical", "symbol": symbol, "data": data})
-        await ws_broadcast.subscribe_proposal(websocket, symbol, "5m")
+        await ws_broadcast.subscribe_proposal(websocket, symbol, "1m")
         logger.info("Proposal WS client connected to /ws/%s, sent %d historical candles", symbol, len(data))
         while True:
             await websocket.receive_text()
@@ -1069,7 +1073,7 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
     """
     symbol = normalize_symbol(symbol)
     await websocket.accept()
-    await ws_broadcast.subscribe(websocket, symbol, "5m")
+    await ws_broadcast.subscribe(websocket, symbol, "1m")
     logger.info("Client connected to /ws/candles/%s (shared feed)", symbol)
     try:
         while True:

@@ -17,14 +17,10 @@ interface ArrowLayout {
   startY: number;
   endX: number;
   endY: number;
+  tpLines: { y: number; label: string; price: number }[];
   direction: 'BULLISH' | 'BEARISH';
 }
 
-/**
- * FMCBR Arrow Overlay (V2 - Diagonal Momentum Arrow)
- * Renders a large, diagonal glowing arrow as per user request (how.png).
- * Points from the breakout/signal point towards the expected target.
- */
 export default function FMCBRArrowOverlay({
   chart,
   candleSeries,
@@ -40,7 +36,6 @@ export default function FMCBRArrowOverlay({
       return;
     }
 
-    // Allow all signal statuses that have a direction
     if (!signal.direction || !signal.status) {
       setLayout(null);
       return;
@@ -61,28 +56,32 @@ export default function FMCBRArrowOverlay({
 
       const isUp = signal.direction === 'BULLISH';
       
-      // Position the arrow just after the last candle (in the "future" space)
-      // Anchor it near the latest price action as per user's screenshot
-      const startX = lastX + 30;
-      const endX = lastX + 160;
+      // Calculate Y coordinates for signals
+      const startY = candleSeries.priceToCoordinate(signal.setup) ?? 100;
       
-      // Vertical placement near the top, aligned with the price/trend indicator area
-      const baseY = 70;
-      // Bullish points UP (smaller Y), Bearish points DOWN (larger Y)
-      const startY = isUp ? baseY + 40 : baseY - 40;
-      const endY = isUp ? baseY - 40 : baseY + 40;
+      // Get TP levels
+      const tpLevels = signal.levels.filter(l => l.type === 'tp');
+      const tp3 = tpLevels.find(l => l.label === 'TP3') || tpLevels[tpLevels.length - 1];
+      const endY = tp3 ? (candleSeries.priceToCoordinate(tp3.price) ?? startY + 100) : startY + 100;
+
+      // Draw TP lines
+      const tpLines = tpLevels.slice(0, 3).map(l => ({
+        y: candleSeries.priceToCoordinate(l.price) ?? 0,
+        label: l.label,
+        price: l.price
+      }));
 
       setLayout({
-        startX,
+        startX: lastX + 30,
         startY,
-        endX,
+        endX: lastX + 150,
         endY,
+        tpLines,
         direction: signal.direction as 'BULLISH' | 'BEARISH',
       });
     };
 
     updateLayout();
-    
     const interval = window.setInterval(updateLayout, 100);
     const onResize = () => updateLayout();
     window.addEventListener('resize', onResize);
@@ -93,80 +92,104 @@ export default function FMCBRArrowOverlay({
     };
   }, [chart, candleSeries, containerRef, signal, visible]);
 
-  if (!layout) {
-    return null;
-  }
+  if (!layout) return null;
 
-  const { startX, startY, endX, endY, direction } = layout;
+  const { startX, startY, endX, endY, direction, tpLines } = layout;
   const isUp = direction === 'BULLISH';
-  
-  // SVG ViewBox math
-  const minX = Math.min(startX, endX) - 20;
-  const maxX = Math.max(startX, endX) + 20;
-  const minY = Math.min(startY, endY) - 20;
-  const maxY = Math.max(startY, endY) + 20;
-  
-  const width = maxX - minX;
-  const height = maxY - minY;
-
   const accentColor = isUp ? '#00ffcc' : '#ff3366';
   const glowColor = isUp ? 'rgba(0, 255, 204, 0.4)' : 'rgba(255, 51, 102, 0.4)';
 
   // Arrowhead math
   const angle = Math.atan2(endY - startY, endX - startX);
-  const headSize = 22; // Slightly larger head
-  const x1 = endX - headSize * Math.cos(angle - Math.PI / 6);
-  const y1 = endY - headSize * Math.sin(angle - Math.PI / 6);
-  const x2 = endX - headSize * Math.cos(angle + Math.PI / 6);
-  const y2 = endY - headSize * Math.sin(angle + Math.PI / 6);
+  const headSize = 18;
+  const hx1 = endX - headSize * Math.cos(angle - Math.PI / 6);
+  const hy1 = endY - headSize * Math.sin(angle - Math.PI / 6);
+  const hx2 = endX - headSize * Math.cos(angle + Math.PI / 6);
+  const hy2 = endY - headSize * Math.sin(angle + Math.PI / 6);
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-20">
-      <svg
-        width="100%"
-        height="100%"
-        className="absolute inset-0 overflow-visible"
-        style={{ filter: 'drop-shadow(0 0 15px ' + glowColor + ')' }}
-      >
+    <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+      <svg width="100%" height="100%" className="absolute inset-0 overflow-visible">
         <defs>
-          <linearGradient id={`grad-${direction}`} x1="0%" y1="100%" x2="0%" y2="0%">
-            {/* Gradient from bottom to top as requested */}
-            <stop offset="0%" stopColor={accentColor} stopOpacity="0.05" />
-            <stop offset="100%" stopColor={accentColor} stopOpacity="0.5" />
+          <linearGradient id={`fmcbr-grad-${direction}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={accentColor} stopOpacity="0.8" />
+            <stop offset="100%" stopColor={accentColor} stopOpacity="0.2" />
           </linearGradient>
         </defs>
 
-        {/* The Arrow Line */}
-        <line
-          x1={startX}
-          y1={startY}
-          x2={endX}
-          y2={endY}
-          stroke={`url(#grad-${direction})`}
-          strokeWidth="10" 
-          strokeLinecap="round"
-          className="animate-pulse"
-        />
-
-        {/* The Arrow Head */}
-        <path
-          d={`M ${endX} ${endY} L ${x1} ${y1} L ${x2} ${y2} Z`}
-          fill={accentColor}
-          fillOpacity="0.5"
-          className="animate-pulse"
-        />
-
-        {/* Label near the end of the arrow - also semi-transparent */}
-        <foreignObject x={endX + 10} y={endY - 15} width="160" height="45">
-          <div className="flex items-center gap-2 opacity-80">
-            <div 
-              className="rounded-full px-2 py-1 text-[11px] font-black italic tracking-tighter text-white shadow-xl backdrop-blur-md"
-              style={{ 
-                background: `linear-gradient(90deg, ${accentColor}CC 0%, rgba(0,0,0,0.6) 100%)`,
-                border: `1px solid ${accentColor}88`
-              }}
+        {/* ─── Horizontal TP Lines ─── */}
+        {tpLines.map((line, i) => (
+          <g key={i}>
+            <line
+              x1={startX - 10}
+              y1={line.y}
+              x2={startX + 300}
+              y2={line.y}
+              stroke={accentColor}
+              strokeWidth="1"
+              strokeDasharray="4,4"
+              opacity="0.4"
+            />
+            <text
+              x={startX + 180}
+              y={line.y - 4}
+              fill={accentColor}
+              fontSize="9"
+              fontWeight="bold"
+              opacity="0.8"
             >
-              FMCBR {direction}
+              {line.label}: ${line.price.toFixed(2)}
+            </text>
+          </g>
+        ))}
+
+        {/* ─── Bended Diagonal Path ─── */}
+        <path
+          d={`M ${startX} ${startY} Q ${startX + (endX - startX) * 0.2} ${startY + (endY - startY) * 0.8}, ${endX} ${endY}`}
+          stroke={`url(#fmcbr-grad-${direction})`}
+          strokeWidth="6"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.6"
+        />
+        <path
+          d={`M ${endX} ${endY} L ${hx1} ${hy1} L ${hx2} ${hy2} Z`}
+          fill={accentColor}
+          opacity="0.9"
+          style={{ filter: `drop-shadow(0 0 8px ${glowColor})` }}
+        />
+
+        {/* ─── Structure Break Circle (Semafor-like) ─── */}
+        <circle
+          cx={startX}
+          cy={startY}
+          r="12"
+          fill="rgba(0,0,0,0.8)"
+          stroke={accentColor}
+          strokeWidth="2"
+        />
+        <path
+          d={isUp ? `M ${startX} ${startY + 6} L ${startX} ${startY - 6} M ${startX - 4} ${startY - 2} L ${startX} ${startY - 6} L ${startX + 4} ${startY - 2}` : `M ${startX} ${startY - 6} L ${startX} ${startY + 6} M ${startX - 4} ${startY + 2} L ${startX} ${startY + 6} L ${startX + 4} ${startY + 2}`}
+          stroke="white"
+          strokeWidth="2"
+          fill="none"
+        />
+
+        {/* ─── Signal Label at Start (Shifted Right to avoid candles) ─── */}
+        <foreignObject x={startX + 20} y={startY - 40} width="160" height="100">
+          <div 
+            className="rounded-lg px-2.5 py-1.5 text-[11px] font-black italic tracking-tighter text-white shadow-2xl backdrop-blur-xl border border-white/20"
+            style={{ 
+              background: `linear-gradient(135deg, ${accentColor}CC 0%, rgba(10,10,10,0.9) 100%)`,
+              boxShadow: `0 4px 20px rgba(0,0,0,0.5), inset 0 0 10px rgba(255,255,255,0.05)`
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="whitespace-nowrap">FMCBR {direction}</span>
+              <span className="text-[7px] bg-white/20 px-1 rounded opacity-50">V3.0</span>
+            </div>
+            <div className="text-[8px] font-bold opacity-70 mt-0.5 leading-tight">
+              {signal.status === 'READY' ? `Confirmed ${signal.breakType}` : 'Waiting for CB1...'}
             </div>
           </div>
         </foreignObject>

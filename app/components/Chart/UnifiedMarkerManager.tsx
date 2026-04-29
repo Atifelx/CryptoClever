@@ -91,14 +91,14 @@ export default function UnifiedMarkerManager({
             size: circleSize - 0.5,
           });
         } else {
-          // HISTORICAL PIVOT — standard Semafor circles
-          const color = isHigh
-            ? (point.strength === 3 ? '#ff4400' : point.strength === 2 ? '#ff6600' : '#ff8800')
-            : (point.strength === 3 ? '#00cc00' : point.strength === 2 ? '#00bb44' : '#00aa66');
+          // HISTORICAL PIVOT — standard Semafor circles (Lvl 1 & 2 only)
+          if (point.strength === 3) continue; // Handled by SemaforOverlay
 
-          const size = point.strength === 3 ? 2.0
-                     : point.strength === 2 ? 1.5
-                     : 1.0;
+          const color = isHigh
+            ? (point.strength === 2 ? '#ff6600' : '#ff8800')
+            : (point.strength === 2 ? '#00bb44' : '#00aa66');
+
+          const size = point.strength === 2 ? 2.0 : 1.0;
 
           allMarkers.push({
             time: point.time as any,
