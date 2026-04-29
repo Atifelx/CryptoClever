@@ -125,19 +125,56 @@ async def run_twelvedata_ws() -> None:
                                 candle_time = (ts // period) * period
                                 current = _current_candles[symbol].get(interval)
                                 
+                                # DETECT NEW CANDLE START
                                 if current and current["time"] != candle_time:
+                                    # CLOSE OLD CANDLE
                                     current["is_closed"] = True
                                     await append_candle(symbol, interval, current)
                                     await broadcast_candle(symbol, interval, current)
                                     current = None
                                 
                                 if not current:
-                                    current = {"time": candle_time, "open": price, "high": price, "low": price, "close": price, "volume": 0, "is_closed": False}
+                                    # INITIALIZE NEW CANDLE with continuity
+                                    prev_candles = await get_candles(symbol, interval)
+                                    base_open = price
+                                    if prev_candles:
+                                        base_open = prev_candles[-1]["close"]
+                                    
+                                    current = {
+                                        "time": candle_time, 
+                                        "open": base_open, 
+                                        "high": max(base_open, price), 
+                                        "low": min(base_open, price), 
+                                        "close": price, 
+                                        "volume": 0, 
+                                        "is_closed": False
+                                    }
                                 else:
-                                    current["high"] = max(current["high"], price); current["low"] = min(current["low"], price); current["close"] = price
+                                    # UPDATE HIGH/LOW only if current tick is valid
+                                    current["high"] = max(current["high"], price)
+                                    current["low"] = min(current["low"], price)
+                                    current["close"] = price
                                 
                                 _current_candles[symbol][interval] = current
-                                await broadcast_candle_proposal(symbol, interval, current)
+                                
+                                # BROADCAST PROPOSAL (The 'Forming' Candle)
+                                # We only send this if it's NOT flat, to avoid indicator noise
+                                if current["high"] > current["low"]:
+                                    await broadcast_candle_proposal(symbol, interval, current)
+                                
+                                # TICK REPAIR: Trigger official sync for the just-closed candle
+                                if current["is_closed"] == False and not current.get("_synced"):
+                                    async def sync_prev(s, iv, ct):
+                                        await asyncio.sleep(3) # Wait for REST to settle
+                                        rows = await _fetch_twelvedata_series(s, iv, 5)
+                                        if rows:
+                                            oc = _rows_to_candles(rows)
+                                            for c in oc:
+                                                if c["time"] < ct:
+                                                    await append_candle(s, iv, c)
+                                                    await broadcast_candle(s, iv, c)
+                                    asyncio.create_task(sync_prev(symbol, interval, candle_time))
+                                    current["_synced"] = True
                         elif data.get("event") == "heartbeat":
                             pass # logger.debug("[TWELVEDATA_WS] Heartbeat OK")
                         elif data.get("event") == "error":

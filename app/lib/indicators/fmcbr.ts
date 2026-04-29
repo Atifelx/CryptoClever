@@ -131,11 +131,12 @@ function detectFMCBRBreak(candles: Candle[]) {
   let bestBullish: any = null;
   let bestBearish: any = null;
 
-  for (let i = candles.length - 1; i >= candles.length - 60; i--) {
+  for (let i = candles.length - 1; i >= Math.max(0, candles.length - 100); i--) {
     const c = candles[i];
 
     // Check for Bullish Break of a major pivot high
-    const majorHigh = pivotHighs.filter(p => p.idx < i).sort((a, b) => b.price - a.price)[0];
+    // We only need ONE solid close above to flip trend if price is climbing from a Major Low
+    const majorHigh = pivotHighs.filter(p => p.idx < i).sort((a, b) => b.idx - a.idx)[0];
     if (majorHigh && c.close > majorHigh.price && (!bestBullish || majorHigh.idx > bestBullish.breakIdx)) {
       const recentLow = pivotLows.filter(p => p.idx < majorHigh.idx).sort((a, b) => b.idx - a.idx)[0];
       bestBullish = { 
@@ -143,12 +144,12 @@ function detectFMCBRBreak(candles: Candle[]) {
         direction: 'BULLISH' as const, 
         baseIdx: recentLow ? recentLow.idx : majorHigh.idx, 
         breakIdx: i, 
-        basePrice: recentLow ? recentLow.price : majorHigh.price * 0.99
+        basePrice: recentLow ? recentLow.price : majorHigh.price * 0.999
       };
     }
 
     // Check for Bearish Break of a major pivot low
-    const majorLow = pivotLows.filter(p => p.idx < i).sort((a, b) => a.price - b.price)[0];
+    const majorLow = pivotLows.filter(p => p.idx < i).sort((a, b) => b.idx - a.idx)[0];
     if (majorLow && c.close < majorLow.price && (!bestBearish || majorLow.idx > bestBearish.breakIdx)) {
       const recentHigh = pivotHighs.filter(p => p.idx < majorLow.idx).sort((a, b) => b.idx - a.idx)[0];
       bestBearish = { 
@@ -156,7 +157,7 @@ function detectFMCBRBreak(candles: Candle[]) {
         direction: 'BEARISH' as const, 
         baseIdx: recentHigh ? recentHigh.idx : majorLow.idx, 
         breakIdx: i, 
-        basePrice: recentHigh ? recentHigh.price : majorLow.price * 1.01
+        basePrice: recentHigh ? recentHigh.price : majorLow.price * 1.001
       };
     }
   }
@@ -182,16 +183,23 @@ function detectFMCBRBreak(candles: Candle[]) {
   // and our finalResult is still BEARISH, we should check if it's invalidated.
   if (finalResult && finalResult.direction === 'BEARISH' && lastMajorLow) {
     const currentPrice = candles[candles.length - 1].close;
-    // If we have a Major Low more recent than the bearish break, 
-    // and price has moved UP significantly from it, clear the bearish signal.
-    if (lastMajorLow.time > candles[finalResult.breakIdx].time && currentPrice > lastMajorLow.price * 1.002) {
-      return null; // Force reset to find a new Bullish break
+    // RESET: If price has climbed significantly from a major low, 
+    // it's a structural reversal regardless of previous breaks.
+    if (currentPrice > lastMajorLow.price * 1.0015) {
+      return null; 
+    }
+    // TIMEOUT: If bearish break happened too long ago (e.g. 40 bars) without continuation
+    if (candles.length - finalResult.breakIdx > 40) {
+      return null;
     }
   }
 
   if (finalResult && finalResult.direction === 'BULLISH' && lastMajorHigh) {
     const currentPrice = candles[candles.length - 1].close;
-    if (lastMajorHigh.time > candles[finalResult.breakIdx].time && currentPrice < lastMajorHigh.price * 0.998) {
+    if (currentPrice < lastMajorHigh.price * 0.9985) {
+      return null;
+    }
+    if (candles.length - finalResult.breakIdx > 40) {
       return null;
     }
   }
