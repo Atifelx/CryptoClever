@@ -386,7 +386,7 @@ async def api_historical(symbol: str, interval: str = "5m", hours: int = 12):
         raise HTTPException(status_code=400, detail=f"Interval not supported. Requested: {interval}. Supported: {INTERVALS}")
     
     interval_sec = _HISTORICAL_INTERVAL_SECONDS.get(interval, 60)
-    limit = min(1000, max(1, int(hours * 3600 / interval_sec)))
+    limit = min(2000, max(1, int(hours * 3600 / interval_sec)))
     candles = await get_candles(symbol, interval, limit=limit)
     data = [
         {
@@ -405,11 +405,11 @@ async def api_historical(symbol: str, interval: str = "5m", hours: int = 12):
 
 @app.get("/streaming/status")
 async def streaming_status():
-    """Verification: for each configured symbol and interval, return candle count (max 1000), last_candle_time, and last candle OHLC from Redis."""
+    """Verification: for each configured symbol and interval, return candle count (max 2000), last_candle_time, and last candle OHLC from Redis."""
     per_symbol = []
     for symbol in SYMBOLS:
         for interval in INTERVALS:
-            data = await get_candles(symbol, interval, limit=1000)
+            data = await get_candles(symbol, interval, limit=2000)
             count = len(data)
             last = data[-1] if data else None
             last_candle_time = last.get("time") if last else None
@@ -504,7 +504,7 @@ INSPECT_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <h1>Candles inspect</h1>
-  <p class="sub">Every symbol × interval: candle count (target 1000), last candle time, and last close/open so you can verify data differs per symbol. Auto-refreshes every 2s.</p>
+  <p class="sub">Every symbol × interval: candle count (target 2000), last candle time, and last close/open so you can verify data differs per symbol. Auto-refreshes every 2s.</p>
   <div id="serverStatus" class="status-box err">Checking backend…</div>
   <p class="sub">Last fetch: <span id="lastFetch">—</span> · Store last updated: <span id="storeUpdate">—</span></p>
   <table>
@@ -546,11 +546,11 @@ INSPECT_HTML = """<!DOCTYPE html>
     let prev = {};
     function formatTime(ts) {
       if (ts == null) return '—';
-      const d = new Date(ts * 1000);
+      const d = new Date(ts * 2000);
       return d.toLocaleString();
     }
     function status(count) {
-      if (count >= 1000) return { text: 'OK', cls: 'ok' };
+      if (count >= 2000) return { text: 'OK', cls: 'ok' };
       if (count > 0) return { text: 'Partial', cls: 'warn' };
       return { text: 'Empty', cls: 'err' };
     }
@@ -569,7 +569,7 @@ INSPECT_HTML = """<!DOCTYPE html>
           lastFetchEl.textContent = new Date().toLocaleTimeString();
           const ts = data.last_store_update_ts;
           if (ts && ts > 0) {
-            const ago = Math.round(Date.now() / 1000 - ts);
+            const ago = Math.round(Date.now() / 2000 - ts);
             if (ago < 60) storeUpdateEl.innerHTML = '<span class="ok">' + ago + 's ago</span>';
             else if (ago < 120) storeUpdateEl.innerHTML = '<span class="warn">' + ago + 's ago</span>';
             else storeUpdateEl.innerHTML = '<span class="err">' + ago + 's ago (Binance stream may have stopped)</span>';
@@ -616,7 +616,7 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Verify: Binance 1000 candles (5m)</title>
+  <title>Verify: Binance 2000 candles (5m)</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 16px; }
@@ -638,9 +638,9 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <h1>Verify: Binance 1000 candles</h1>
-  <p class="sub">Table of candle counts per symbol × interval (target 1000). Auto-refreshes every 4s.</p>
-  <p id="summary" class="summary">All symbols (5m) have 1000 candles: —</p>
+  <h1>Verify: Binance 2000 candles</h1>
+  <p class="sub">Table of candle counts per symbol × interval (target 2000). Auto-refreshes every 4s.</p>
+  <p id="summary" class="summary">All symbols (5m) have 2000 candles: —</p>
   <div id="serverStatus" class="status-box err">Checking backend…</div>
   <p class="sub">Last fetch: <span id="lastFetch">—</span></p>
   <table>
@@ -658,7 +658,7 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
     const statusUrl = apiBase + '/streaming/status';
 
     function status(count) {
-      if (count >= 1000) return { text: 'OK', cls: 'ok' };
+      if (count >= 2000) return { text: 'OK', cls: 'ok' };
       if (count > 0) return { text: 'Partial', cls: 'warn' };
       return { text: 'Empty', cls: 'err' };
     }
@@ -671,13 +671,13 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
         } catch (parseErr) {
           serverStatusEl.className = 'status-box err';
           serverStatusEl.textContent = 'Backend returned invalid JSON. Is the backend running on port 8000?';
-          summaryEl.textContent = 'All symbols (1m) have 1000 candles: No – see table below';
+          summaryEl.textContent = 'All symbols (1m) have 2000 candles: No – see table below';
           summaryEl.className = 'summary no';
           tbody.innerHTML = '<tr><td colspan="5" class="err">Invalid response (not JSON). Open <a href="' + (apiBase || '') + '/verify/candles" style="color:#26a69a;">backend directly</a> (port 8000) or ensure BACKEND_URL is set and backend is running.</td></tr>';
           return;
         }
         if (!r.ok) {
-          summaryEl.textContent = 'All symbols (1m) have 1000 candles: No – see table below';
+          summaryEl.textContent = 'All symbols (1m) have 2000 candles: No – see table below';
           summaryEl.className = 'summary no';
           serverStatusEl.className = 'status-box err';
           serverStatusEl.textContent = 'Backend returned ' + r.status + (data && data.error ? ': ' + data.error : '');
@@ -688,16 +688,16 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
         const list = data.per_symbol || [];
         if (list.length === 0) {
           tbody.innerHTML = '<tr><td colspan="5" class="err">No candle data yet. Wait 1–2 minutes after starting the backend for Binance bootstrap to complete. Use memory store: <code>USE_MEMORY_STORE=1</code> (no Redis needed), or ensure Redis is running. Then reload this page.</td></tr>';
-          summaryEl.textContent = 'All symbols (1m) have 1000 candles: No – see table below';
+          summaryEl.textContent = 'All symbols (1m) have 2000 candles: No – see table below';
           summaryEl.className = 'summary no';
           serverStatusEl.className = 'status-box warn';
           serverStatusEl.textContent = 'Backend reachable but no candle data. Bootstrap may still be running (1–2 min).';
           return;
         }
         const rows1m = list.filter(function(x) { return x.interval === '1m'; });
-        const all1000 = rows1m.length > 0 && rows1m.every(function(x) { return x.count >= 1000; });
-        summaryEl.textContent = 'All symbols (1m) have 1000 candles: ' + (all1000 ? 'Yes' : 'No – see table below');
-        summaryEl.className = 'summary ' + (all1000 ? 'ok' : 'no');
+        const all2000 = rows1m.length > 0 && rows1m.every(function(x) { return x.count >= 2000; });
+        summaryEl.textContent = 'All symbols (1m) have 2000 candles: ' + (all2000 ? 'Yes' : 'No – see table below');
+        summaryEl.className = 'summary ' + (all2000 ? 'ok' : 'no');
         serverStatusEl.className = 'status-box ok';
         serverStatusEl.textContent = 'Backend reachable. Candle counts below.';
         const rows = list.map(function(x) {
@@ -707,7 +707,7 @@ VERIFY_CANDLES_HTML = """<!DOCTYPE html>
         });
         tbody.innerHTML = rows.join('');
       } catch (e) {
-        summaryEl.textContent = 'All symbols (1m) have 1000 candles: No – see table below';
+        summaryEl.textContent = 'All symbols (1m) have 2000 candles: No – see table below';
         summaryEl.className = 'summary no';
         serverStatusEl.className = 'status-box err';
         serverStatusEl.textContent = 'Cannot reach backend. Is it running on port 8000? If using Next.js, open <a href="/api/backend/verify/candles" style="color:#26a69a;">/api/backend/verify/candles</a>.';
@@ -771,7 +771,7 @@ BINANCE_PIPELINE_PAGE_HTML = """<!DOCTYPE html>
     const pipelineUrl = apiBase + '/debug/binance-pipeline';
     function formatTime(ts) {
       if (ts == null) return '—';
-      if (ts < 1e10) ts *= 1000;
+      if (ts < 1e10) ts *= 2000;
       return new Date(ts).toLocaleString();
     }
     async function refresh() {
@@ -817,13 +817,13 @@ BINANCE_PIPELINE_PAGE_HTML = """<!DOCTYPE html>
 
 @app.get("/inspect", response_class=HTMLResponse)
 async def inspect_candles():
-    """Browser page: see every symbol × interval candle count (target 1000) and last candle time; auto-refreshes so you can see new candles updating."""
+    """Browser page: see every symbol × interval candle count (target 2000) and last candle time; auto-refreshes so you can see new candles updating."""
     return INSPECT_HTML
 
 
 @app.get("/verify/candles", response_class=HTMLResponse)
 async def verify_candles():
-    """Browser page: verify Binance has loaded 1000 candles per symbol/interval. Shows summary and table; auto-refreshes every 4s."""
+    """Browser page: verify Binance has loaded 2000 candles per symbol/interval. Shows summary and table; auto-refreshes every 4s."""
     return VERIFY_CANDLES_HTML
 
 
@@ -875,7 +875,7 @@ INSPECT_WS_HTML = """<!DOCTYPE html>
 
     function addRow(msg) {
       const c = msg.candle || {};
-      const t = c.time != null ? new Date(c.time * 1000).toLocaleString() : '—';
+      const t = c.time != null ? new Date(c.time * 2000).toLocaleString() : '—';
       const now = new Date().toLocaleTimeString();
       const r = [now, msg.symbol || '—', msg.interval || '—', t, c.open, c.high, c.low, c.close, (c.volume != null ? Number(c.volume).toFixed(0) : '—')];
       rows.unshift(r);
@@ -972,7 +972,7 @@ VERIFY_LIVE_HTML = """<!DOCTYPE html>
 
     function addRow(msg) {
       const c = msg.candle || {};
-      const t = c.time != null ? new Date(c.time * 1000).toLocaleString() : '—';
+      const t = c.time != null ? new Date(c.time * 2000).toLocaleString() : '—';
       const now = new Date().toLocaleTimeString();
       const r = [now, msg.symbol || '—', msg.interval || '—', t, c.open, c.high, c.low, c.close, (c.volume != null ? Number(c.volume).toFixed(0) : '—')];
       rows.unshift(r);
@@ -1039,7 +1039,7 @@ async def websocket_proposal(websocket: WebSocket, symbol: str):
     
     try:
         # Default to 1m for base data
-        candles = await get_candles(symbol, "1m", limit=1000)
+        candles = await get_candles(symbol, "1m", limit=2000)
         data = [
             {
                 "time": c["time"],
@@ -1128,7 +1128,7 @@ async def candles(symbol: str, interval: str, limit: int = 500):
     print(f"[FRONTEND_REQUEST] Raw interval from URL path: '{interval}'", file=sys.stderr)
     print(f"[FRONTEND_REQUEST] Limit: {limit}", file=sys.stderr)
 
-    if limit < 1 or limit > 1000:
+    if limit < 1 or limit > 2000:
         limit = 500
     symbol_normalized = normalize_symbol(symbol)
     interval_normalized = normalize_interval(interval)

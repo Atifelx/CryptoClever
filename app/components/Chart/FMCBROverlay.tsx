@@ -48,8 +48,8 @@ export default function FMCBROverlay({
 
     const { levels, direction, breakType, cb1 } = signal;
 
-    // ONLY render Base and Setup as subtle context lines
-    // Targets (TP) are handled by the SVG Arrow Overlay for a cleaner "localized" look
+    // LOCALIZED MODE: Only render Base and Setup as full-width context lines.
+    // TP and Entry targets are now rendered as short localized segments in FMCBRArrowOverlay.
     const visibleLevels = levels.filter(level => level.type === 'base' || level.type === 'setup');
 
     if (visibleLevels.length === 0) {

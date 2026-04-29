@@ -68,7 +68,7 @@ def _rows_to_candles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def bootstrap_forex_symbol(symbol: str) -> None:
     logger.info("[TWELVEDATA_BOOTSTRAP] Fetching %s history (1m & 5m)", symbol)
     for interval in ["1m", "5m"]:
-        rows = await _fetch_twelvedata_series(symbol, interval, 1000)
+        rows = await _fetch_twelvedata_series(symbol, interval, 2000)
         if rows:
             candles = _rows_to_candles(rows)
             await set_candles(symbol, interval, candles)
@@ -114,7 +114,7 @@ async def run_twelvedata_ws() -> None:
                             # Normalize timestamp: TwelveData can send ms or seconds
                             # If > 10^11, it's almost certainly milliseconds (as of year 2024+)
                             if ts > 10**11:
-                                ts = ts // 1000
+                                ts = ts // 2000
                             
                             symbol = next((k for k, v in _TWELVEDATA_SYMBOL_MAP.items() if v == symbol_prov), symbol_prov)
                             

@@ -19,7 +19,7 @@ export function useBackendCandlesLoader(selectedSymbol: string) {
 
     const fetchCandles = async () => {
       const apiBase = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:8000';
-      const url = `${apiBase}/candles/${selectedSymbol}/5m?limit=1000`;
+      const url = `${apiBase}/candles/${selectedSymbol}/5m?limit=2000`;
 
       try {
         const res = await fetch(url);

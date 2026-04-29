@@ -22,7 +22,7 @@ INTERVALS = ["1m", "5m"]
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # Set to "1" or "true" to use in-memory store instead of Redis (no Redis needed for local testing)
 USE_MEMORY_STORE = os.getenv("USE_MEMORY_STORE", "true").lower() in ("1", "true", "yes")
-BUFFER_SIZE = 1000  # Max candles per symbol/interval in Redis (as per user request)
+BUFFER_SIZE = 2000  # Max candles per symbol/interval in Redis (increased to match MT4 accuracy)
 
 # Binance WebSocket base URL
 BINANCE_WS_BASE = "wss://stream.binance.com:9443"

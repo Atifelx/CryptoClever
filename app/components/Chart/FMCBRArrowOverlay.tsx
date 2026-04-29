@@ -59,13 +59,13 @@ export default function FMCBRArrowOverlay({
       // Calculate Y coordinates for signals
       const startY = candleSeries.priceToCoordinate(signal.setup) ?? 100;
       
-      // Get TP levels
-      const tpLevels = signal.levels.filter(l => l.type === 'tp');
-      const tp3 = tpLevels.find(l => l.label === 'TP3') || tpLevels[tpLevels.length - 1];
+      // Get TP and Entry levels for localized rendering
+      const targetLevels = signal.levels.filter(l => l.type === 'tp' || l.type === 'entry');
+      const tp3 = signal.levels.find(l => l.label.includes('Complete Cycle'));
       const endY = tp3 ? (candleSeries.priceToCoordinate(tp3.price) ?? startY + 100) : startY + 100;
 
-      // Draw TP lines
-      const tpLines = tpLevels.slice(0, 3).map(l => ({
+      // Localized lines to render
+      const tpLines = targetLevels.map(l => ({
         y: candleSeries.priceToCoordinate(l.price) ?? 0,
         label: l.label,
         price: l.price
@@ -117,46 +117,48 @@ export default function FMCBRArrowOverlay({
           </linearGradient>
         </defs>
 
-        {/* ─── Horizontal TP Lines ─── */}
-        {tpLines.map((line, i) => (
+        {/* ─── Localized TP & Entry Lines (Kept within the active zone) ─── */}
+        {layout.tpLines.map((line, i) => (
           <g key={i}>
             <line
-              x1={startX - 10}
+              x1={startX - 5}
               y1={line.y}
-              x2={startX + 300}
+              x2={startX + 240}
               y2={line.y}
               stroke={accentColor}
-              strokeWidth="1"
+              strokeWidth="1.5"
               strokeDasharray="4,4"
-              opacity="0.4"
+              opacity="0.6"
             />
             <text
-              x={startX + 180}
+              x={startX + 140}
               y={line.y - 4}
               fill={accentColor}
-              fontSize="9"
-              fontWeight="bold"
-              opacity="0.8"
+              fontSize="10"
+              fontWeight="900"
+              className="italic tracking-tighter"
+              style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.8))' }}
             >
               {line.label}: ${line.price.toFixed(2)}
             </text>
           </g>
         ))}
 
-        {/* ─── Bended Diagonal Path ─── */}
+        {/* ─── Bended Diagonal Path (Curved towards signal box) ─── */}
         <path
-          d={`M ${startX} ${startY} Q ${startX + (endX - startX) * 0.2} ${startY + (endY - startY) * 0.8}, ${endX} ${endY}`}
+          d={`M ${startX} ${startY} Q ${startX + (endX - startX) * 0.1} ${startY + (endY - startY) * 0.95}, ${endX} ${endY}`}
           stroke={`url(#fmcbr-grad-${direction})`}
-          strokeWidth="6"
+          strokeWidth="8"
           strokeLinecap="round"
           fill="none"
-          opacity="0.6"
+          opacity="0.75"
+          style={{ filter: `drop-shadow(0 0 15px ${glowColor})` }}
         />
         <path
           d={`M ${endX} ${endY} L ${hx1} ${hy1} L ${hx2} ${hy2} Z`}
           fill={accentColor}
-          opacity="0.9"
-          style={{ filter: `drop-shadow(0 0 8px ${glowColor})` }}
+          opacity="1"
+          style={{ filter: `drop-shadow(0 0 12px ${glowColor})` }}
         />
 
         {/* ─── Structure Break Circle (Semafor-like) ─── */}

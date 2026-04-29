@@ -53,14 +53,31 @@ def _kline_to_candle(k: dict[str, Any]) -> dict[str, Any]:
 
 async def bootstrap_symbol_interval(symbol: str, interval: str) -> None:
     url = f"{BINANCE_REST_BASE}/klines"
-    params = {"symbol": symbol, "interval": interval, "limit": 1000}
+    
+    # Binance limit is 1000 per request. To get 2000, we fetch twice.
+    all_raw = []
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params, timeout=10.0)
-            r.raise_for_status()
-            data = r.json()
+            # 1. Fetch most recent 1000
+            r1 = await client.get(url, params={"symbol": symbol, "interval": interval, "limit": 1000}, timeout=10.0)
+            r1.raise_for_status()
+            batch1 = r1.json()
+            if batch1:
+                all_raw = batch1
+                # 2. Fetch older 1000 using the first candle's timestamp as endTime
+                first_ts = batch1[0][0]
+                r2 = await client.get(url, params={"symbol": symbol, "interval": interval, "limit": 1000, "endTime": first_ts - 1}, timeout=10.0)
+                r2.raise_for_status()
+                batch2 = r2.json()
+                if batch2:
+                    all_raw = batch2 + all_raw # Join older + newer
+            
+            if not all_raw:
+                logger.warning("[BINANCE_BOOTSTRAP] No candles fetched for %s %s", symbol, interval)
+                return
+
             candles = []
-            for k in data:
+            for k in all_raw:
                 candles.append({
                     "time": k[0] // 1000,
                     "open": float(k[1]),
@@ -68,11 +85,14 @@ async def bootstrap_symbol_interval(symbol: str, interval: str) -> None:
                     "low": float(k[3]),
                     "close": float(k[4]),
                     "volume": float(k[5]),
+                    "is_closed": True,
                 })
+            
             await set_candles(symbol, interval, candles)
-            logger.info("[BINANCE_BOOTSTRAP] %s %s: %d candles", symbol, interval, len(candles))
+            logger.info("[BINANCE_BOOTSTRAP] %s %s: loaded=%d", symbol, interval, len(candles))
+            
     except Exception as e:
-        logger.warning("[BINANCE_BOOTSTRAP] %s %s failed: %s", symbol, interval, e)
+        logger.error("[BINANCE_BOOTSTRAP] Error for %s %s: %s", symbol, interval, e)
 
 async def bootstrap_all() -> None:
     logger.info("[BOOTSTRAP_START] Binance Symbols=%s | Intervals=[1m, 5m]", CRYPTO_SYMBOLS)

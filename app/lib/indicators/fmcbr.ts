@@ -58,15 +58,24 @@ function aggregateCandles(candles: Candle[], periodSeconds: number): Candle[] {
 // ──── FIBONACCI RATIOS (OFFICIAL FMCBR 3.0) ────
 const FIBO = {
   BASE: 0.000,
-  MAJOR_ENTRY: 0.236,
-  MINOR_ENTRY: 0.382,
-  SETUP: 1.000,
-  TP1: 1.618,
-  TP1_EXT: 1.880,
-  TP2: 2.618,
-  TP2_EXT: 2.880,
-  TP3: 4.230,
-  TP3_EXT: 4.880,
+  ENTRY_12: 0.120,
+  ENTRY_236: 0.236,
+  PRE_ENTRY_382: 0.382,
+  PRE_ENTRY_50: 0.500,
+  PULLBACK_786: 0.786,
+  BREAKOUT_88: 0.880,
+  SETUP_100: 1.000,
+  PRE_TP_127: 1.272,
+  PRE_TP_131: 1.314,
+  TP1_161: 1.618,
+  EXIT_TP1_178: 1.786,
+  EXIT_TP1_188: 1.880,
+  TP2_261: 2.618,
+  EXIT_TP2_278: 2.786,
+  EXIT_TP2_288: 2.880,
+  CYCLE_423: 4.230,
+  EXIT_CYCLE_478: 4.786,
+  EXIT_CYCLE_488: 4.880,
 };
 
 export interface FMCBRLevel {
@@ -100,131 +109,83 @@ export interface FMCBRSignal {
 function detectFMCBRBreak(candles: Candle[]) {
   if (candles.length < 50) return null;
 
-  // 1. Find SIGNIFICANT pivots (5-candle window for major structure)
-  const pivotHighs: { idx: number, price: number, strength: number }[] = [];
-  const pivotLows: { idx: number, price: number, strength: number }[] = [];
+  // 1. Find Structural pivots (using a stable window)
+  const pivotHighs: { idx: number, price: number }[] = [];
+  const pivotLows: { idx: number, price: number }[] = [];
   
-  const window = 5;
-  for (let i = candles.length - 100; i < candles.length - window; i++) {
-    if (i < window) continue;
+  const window = 3; 
+  for (let i = window; i < candles.length - window; i++) {
     const c = candles[i];
     
-    // Pivot High (Structural)
     let isHigh = true;
-    for (let j = i - window; j <= i + window; j++) {
-      if (j === i) continue;
-      if (candles[j].high >= c.high) { isHigh = false; break; }
-    }
-    if (isHigh) pivotHighs.push({ idx: i, price: c.high, strength: c.high - c.low });
-
-    // Pivot Low (Structural)
     let isLow = true;
     for (let j = i - window; j <= i + window; j++) {
       if (j === i) continue;
-      if (candles[j].low <= c.low) { isLow = false; break; }
+      if (candles[j].high >= c.high) isHigh = false;
+      if (candles[j].low <= c.low) isLow = false;
     }
-    if (isLow) pivotLows.push({ idx: i, price: c.low, strength: c.high - c.low });
+    if (isHigh) pivotHighs.push({ idx: i, price: c.high });
+    if (isLow) pivotLows.push({ idx: i, price: c.low });
   }
 
-  // 2. Identify the active breakout (Search most significant recent break)
-  // We look back to find if price has broken a major resistance or support
-  let bestBullish: any = null;
-  let bestBearish: any = null;
-
-  for (let i = candles.length - 1; i >= Math.max(0, candles.length - 100); i--) {
+  // 2. Search for the most RECENT valid structural break
+  // We search back 2000 candles to find a "Sticky" signal (Institutional Depth)
+  for (let i = candles.length - 1; i >= Math.max(0, candles.length - 2000); i--) {
     const c = candles[i];
+    const currentPrice = candles[candles.length - 1].close;
 
-    // Check for Bullish Break of a major pivot high
-    // We only need ONE solid close above to flip trend if price is climbing from a Major Low
-    const majorHigh = pivotHighs.filter(p => p.idx < i).sort((a, b) => b.idx - a.idx)[0];
-    if (majorHigh && c.close > majorHigh.price && (!bestBullish || majorHigh.idx > bestBullish.breakIdx)) {
+    // --- BULLISH CHECK ---
+    const recentHighs = pivotHighs.filter(p => p.idx < i).sort((a, b) => b.idx - a.idx);
+    const majorHigh = recentHighs[0];
+    
+    if (majorHigh && c.close > majorHigh.price) {
       const recentLow = pivotLows.filter(p => p.idx < majorHigh.idx).sort((a, b) => b.idx - a.idx)[0];
-      bestBullish = { 
-        type: 'IB' as const, 
-        direction: 'BULLISH' as const, 
-        baseIdx: recentLow ? recentLow.idx : majorHigh.idx, 
-        breakIdx: i, 
-        basePrice: recentLow ? recentLow.price : majorHigh.price * 0.999
-      };
+      if (recentLow) {
+        // VALIDATION: Has this signal been broken? (Price below base)
+        const basePrice = recentLow.price;
+        const setupPrice = majorHigh.price;
+        const range = setupPrice - basePrice;
+        const tp3 = basePrice + (range * FIBO.CYCLE_423);
+
+        // STICKY RULE: Only return if price is still above base AND hasn't finished the move (TP3)
+        if (currentPrice > basePrice && currentPrice < tp3) {
+          return { 
+            type: 'IB' as const, 
+            direction: 'BULLISH' as const, 
+            baseIdx: recentLow.idx, 
+            breakIdx: i, 
+            basePrice,
+            setupPrice
+          };
+        }
+      }
     }
 
-    // Check for Bearish Break of a major pivot low
-    const majorLow = pivotLows.filter(p => p.idx < i).sort((a, b) => b.idx - a.idx)[0];
-    if (majorLow && c.close < majorLow.price && (!bestBearish || majorLow.idx > bestBearish.breakIdx)) {
+    // --- BEARISH CHECK ---
+    const recentLows = pivotLows.filter(p => p.idx < i).sort((a, b) => b.idx - a.idx);
+    const majorLow = recentLows[0];
+    if (majorLow && c.close < majorLow.price) {
       const recentHigh = pivotHighs.filter(p => p.idx < majorLow.idx).sort((a, b) => b.idx - a.idx)[0];
-      bestBearish = { 
-        type: 'IB' as const, 
-        direction: 'BEARISH' as const, 
-        baseIdx: recentHigh ? recentHigh.idx : majorLow.idx, 
-        breakIdx: i, 
-        basePrice: recentHigh ? recentHigh.price : majorLow.price * 1.001
-      };
+      if (recentHigh) {
+        const basePrice = recentHigh.price;
+        const setupPrice = majorLow.price;
+        const range = basePrice - setupPrice;
+        const tp3 = basePrice - (range * FIBO.CYCLE_423);
+
+        if (currentPrice < basePrice && currentPrice > tp3) {
+          return { 
+            type: 'IB' as const, 
+            direction: 'BEARISH' as const, 
+            baseIdx: recentHigh.idx, 
+            breakIdx: i, 
+            basePrice,
+            setupPrice
+          };
+        }
+      }
     }
   }
 
-  // 3. SEMAFOR INTEGRATION: Detect Major Bottoms/Tops
-  const semaforPoints = calculateSemafor(candles);
-  const majorLows = semaforPoints.filter(p => p.type === 'low' && p.strength === 3);
-  const majorHighs = semaforPoints.filter(p => p.type === 'high' && p.strength === 3);
-
-  const lastMajorLow = majorLows.length > 0 ? majorLows[majorLows.length - 1] : null;
-  const lastMajorHigh = majorHighs.length > 0 ? majorHighs[majorHighs.length - 1] : null;
-
-  // 4. PERSISTENCE: If a major Bullish structure was broken, stay bullish 
-  // unless a more recent or significant Bearish structure break occurs.
-  let finalResult = null;
-  if (bestBullish && bestBearish) {
-    finalResult = bestBullish.breakIdx > bestBearish.breakIdx ? bestBullish : bestBearish;
-  } else {
-    finalResult = bestBullish || bestBearish || null;
-  }
-
-  // 5. TREND RESET: If we have a Major Low (Double Bottom feel) and price is rising, 
-  // and our finalResult is still BEARISH, we should check if it's invalidated.
-  if (finalResult && finalResult.direction === 'BEARISH' && lastMajorLow) {
-    const currentPrice = candles[candles.length - 1].close;
-    // RESET: If price has climbed significantly from a major low, 
-    // it's a structural reversal regardless of previous breaks.
-    if (currentPrice > lastMajorLow.price * 1.0015) {
-      return null; 
-    }
-    // TIMEOUT: If bearish break happened too long ago (e.g. 40 bars) without continuation
-    if (candles.length - finalResult.breakIdx > 40) {
-      return null;
-    }
-  }
-
-  if (finalResult && finalResult.direction === 'BULLISH' && lastMajorHigh) {
-    const currentPrice = candles[candles.length - 1].close;
-    if (currentPrice < lastMajorHigh.price * 0.9985) {
-      return null;
-    }
-    if (candles.length - finalResult.breakIdx > 40) {
-      return null;
-    }
-  }
-  
-  return finalResult;
-}
-
-/**
- * Detect CB1 (Candle Break 1)
- * The first candle that closes above the breakout candle's high (Bullish) 
- * or below its low (Bearish).
- */
-function detectCB1(candles: Candle[], breakIdx: number, direction: 'BULLISH' | 'BEARISH') {
-  if (breakIdx >= candles.length - 1) return null;
-  
-  const breakCandle = candles[breakIdx];
-  for (let i = breakIdx + 1; i < candles.length; i++) {
-    const c = candles[i];
-    if (direction === 'BULLISH' && c.close > breakCandle.high) {
-      return { idx: i, setupPrice: c.high };
-    }
-    if (direction === 'BEARISH' && c.close < breakCandle.low) {
-      return { idx: i, setupPrice: c.low };
-    }
-  }
   return null;
 }
 
@@ -235,68 +196,60 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
 
   try {
     const brk = detectFMCBRBreak(data);
-    if (!brk) return { breakType: null, cb1: false, direction: null, base: 0, setup: 0, levels: [], status: 'WAITING_BREAK' };
+    if (!brk) {
+      // Show stable S/R context when no breakout is active
+      const pivots = calculateSemafor(data).filter(p => p.strength >= 2);
+      const srLevels = pivots.map(p => ({
+        price: p.price,
+        label: p.type === 'high' ? 'RESISTANCE' : 'SUPPORT',
+        type: (p.type === 'high' ? 'resistance' : 'support') as any,
+        level: 'SR'
+      }));
+      return { breakType: null, cb1: false, direction: null, base: 0, setup: 0, levels: srLevels, status: 'WAITING_BREAK' };
+    }
 
-    const direction = brk.direction;
-    
-    // TIGHT RANGE CALCULATION (Matching MT4 'Breakout Zone' feel)
-    // In MT4, the range is based on the candle that was broken.
-    const breakCandle = data[brk.breakIdx];
-    const baseCandle = data[brk.breakIdx - 1]; // The 'Initial' candle
-    
-    const basePrice = direction === 'BULLISH' ? baseCandle.low : baseCandle.high;
-    const setupPrice = direction === 'BULLISH' ? breakCandle.high : breakCandle.low;
+    const { direction, basePrice, setupPrice, breakIdx } = brk;
     const range = Math.abs(setupPrice - basePrice);
 
-    // Detect CB1 (for status only, don't expand range with it)
-    const cb1 = detectCB1(data, brk.breakIdx, direction);
-    const hasCB1 = !!cb1;
-
     const levels: FMCBRLevel[] = [
-      { price: basePrice, label: 'Base', type: 'base', level: 'Base' },
-      { price: setupPrice, label: 'Setup', type: 'setup', level: 'Setup' },
+      { price: basePrice, label: '0.00 = Base Zone', type: 'base', level: 'Base' },
+      { price: setupPrice, label: '100: Setup', type: 'setup', level: 'Setup' },
     ];
 
-    // Add Fibonacci Levels based on this tight local range
     const addLevel = (ratio: number, label: string, type: any) => {
       const price = direction === 'BULLISH' ? basePrice + (range * ratio) : basePrice - (range * ratio);
       levels.push({ price, label, type, level: label });
     };
 
-    addLevel(FIBO.MAJOR_ENTRY, 'Major Entry', 'entry');
-    addLevel(FIBO.MINOR_ENTRY, 'Minor Entry', 'entry');
-    addLevel(FIBO.TP1, 'TP1', 'tp');
-    addLevel(FIBO.TP1_EXT, 'TP1 Ext', 'tp');
-    addLevel(FIBO.TP2, 'TP2', 'tp');
-    addLevel(FIBO.TP2_EXT, 'TP2 Ext', 'tp');
-    addLevel(FIBO.TP3, 'TP3', 'tp');
-    addLevel(FIBO.TP3_EXT, 'TP3 Ext', 'tp');
-
-    // EXHAUSTION CHECK: If price has already smashed TP3 and then reversed past TP1/TP2
-    const currentPrice = data[data.length - 1].close;
-    if (direction === 'BEARISH') {
-      const tp3 = levels.find(l => l.level === 'TP3')?.price || 0;
-      const tp1 = levels.find(l => l.level === 'TP1')?.price || 999999;
-      if (tp3 > 0 && data.some(c => c.low <= tp3) && currentPrice > tp1) {
-        return { breakType: null, cb1: false, direction: null, base: 0, setup: 0, levels: [], status: 'WAITING_BREAK' };
-      }
-    } else {
-      const tp3 = levels.find(l => l.level === 'TP3')?.price || 999999;
-      const tp1 = levels.find(l => l.level === 'TP1')?.price || 0;
-      if (tp3 < 999999 && data.some(c => c.high >= tp3) && currentPrice < tp1) {
-        return { breakType: null, cb1: false, direction: null, base: 0, setup: 0, levels: [], status: 'WAITING_BREAK' };
-      }
-    }
+    // Official MT4 Sequence
+    addLevel(FIBO.ENTRY_12, '12.0 = Entry Zone', 'entry');
+    addLevel(FIBO.ENTRY_236, '23.6 = Entry Zone', 'entry');
+    addLevel(FIBO.PRE_ENTRY_382, '38.2 = PreMature Entry', 'entry');
+    addLevel(FIBO.PRE_ENTRY_50, '50.0 = PreMature Entry', 'entry');
+    addLevel(FIBO.PULLBACK_786, '78.6 = Pullback Zone', 'entry');
+    addLevel(FIBO.BREAKOUT_88, '88.0 = Breakout Zone', 'entry');
+    
+    addLevel(FIBO.PRE_TP_127, '127.2 = PreMature TP', 'tp');
+    addLevel(FIBO.PRE_TP_131, '131.4 = PreMature TP', 'tp');
+    addLevel(FIBO.TP1_161, '161.8 = Alert TP1', 'tp');
+    addLevel(FIBO.EXIT_TP1_178, '178.6 = Alert Exit TP1', 'tp');
+    addLevel(FIBO.EXIT_TP1_188, '188.0 = Alert Exit TP1', 'tp');
+    addLevel(FIBO.TP2_261, '261.8 = Alert TP2', 'tp');
+    addLevel(FIBO.EXIT_TP2_278, '278.6 = Alert Exit TP2', 'tp');
+    addLevel(FIBO.EXIT_TP2_288, '288.0 = Alert Exit TP2', 'tp');
+    addLevel(FIBO.CYCLE_423, '423.0 = Complete Cycle', 'tp');
+    addLevel(FIBO.EXIT_CYCLE_478, '478.6 = ExitCompleteCycle', 'tp');
+    addLevel(FIBO.EXIT_CYCLE_488, '488.0 = ExitCompleteCycle', 'tp');
 
     return {
       breakType: brk.type as 'IB' | 'DB',
-      cb1: hasCB1,
+      cb1: true, // Simplified for sticky mode
       direction,
       base: basePrice,
       setup: setupPrice,
       levels: levels.sort((a, b) => a.price - b.price),
-      status: hasCB1 ? 'READY' : 'WAITING_CB1',
-      signalTime: data[brk.breakIdx].time,
+      status: 'READY',
+      signalTime: data[breakIdx].time,
     };
   } catch (error) {
     console.error('[FMCBR] Calculation error:', error);
@@ -304,9 +257,6 @@ export function calculateFMCBR(candles: Candle[]): FMCBRSignal | null {
   }
 }
 
-/**
- * Re-exporting required candle count based on interval
- */
 export function getFMCBRRequiredCandles(candles: Candle[]): number {
-  return 300; // Simplified for performance, enough for local pivots
+  return 100; // Load instantly, use up to 2000 if available
 }

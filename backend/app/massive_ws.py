@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 # symbol -> { "time": ts, "open": o, "high": h, "low": l, "close": c, "volume": v, "count": n }
 _partial_candles: dict[str, dict[str, Any]] = {}
 
-_HISTORICAL_TARGET_BARS = 720
+_HISTORICAL_TARGET_BARS = 2000
 _BOOTSTRAP_LOOKBACK_DAYS = 16
 _BOOTSTRAP_RETRIES = 4
 _BOOTSTRAP_BACKOFF_SECONDS = 12
 _POLLER_LOOKBACK_DAYS = 2
-_BOOTSTRAP_FETCH_LIMIT = 900
+_BOOTSTRAP_FETCH_LIMIT = 2000
 _POLL_BUFFER_SECONDS = 20
 _FOREX_INTERVAL = "5m"
 
@@ -148,10 +148,10 @@ async def bootstrap_forex_symbol(symbol: str) -> None:
         })
     
     if candles:
-        existing = await get_candles(symbol, _FOREX_INTERVAL, limit=1000)
+        existing = await get_candles(symbol, _FOREX_INTERVAL, limit=2000)
         merged = _merge_candle_lists(existing, candles)
-        if len(merged) > 1000:
-            merged = merged[-1000:]
+        if len(merged) > 2000:
+            merged = merged[-2000:]
         await set_candles(symbol, _FOREX_INTERVAL, merged)
         logger.info(
             "[MASSIVE_BOOTSTRAP] %s: loaded=%d merged_total=%d",
@@ -187,10 +187,10 @@ async def run_massive_ws_for_symbol(symbol: str) -> None:
     while True:
         try:
             # If startup bootstrap was rate limited, recover lazily on the first successful poll.
-            existing = await get_candles(symbol, _FOREX_INTERVAL, limit=1000)
+            existing = await get_candles(symbol, _FOREX_INTERVAL, limit=2000)
             if not existing:
                 await bootstrap_forex_symbol(symbol)
-                existing = await get_candles(symbol, _FOREX_INTERVAL, limit=1000)
+                existing = await get_candles(symbol, _FOREX_INTERVAL, limit=2000)
 
             # Fetch the latest closed 5m candle only once per 5m boundary.
             results = await _fetch_massive_range(
